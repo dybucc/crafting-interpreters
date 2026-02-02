@@ -1,6 +1,6 @@
 #![expect(dead_code, reason = "WIP.")]
 
-use std::{borrow::Borrow, marker::PhantomData};
+use std::{marker::PhantomData, mem};
 
 struct DoublyLinkedList<T> {
     start: Option<Box<Node<T>>>,
@@ -17,35 +17,35 @@ impl<T> DoublyLinkedList<T> {
         }
     }
 
-    fn insert(&mut self, other: T) {
-        if let Some(elem) = &mut self.start {
-            let new = Some(Node {
-                left: None,
-                right: None,
-                inner: other,
-            });
-        } else {
-            self.start = Some(Box::new(Node {
-                left: None,
-                right: None,
-                inner: other,
-            }));
+    fn insert_at(&mut self, other: T, pos: InsertionPos) -> Option<()> {
+        match pos {
+            InsertionPos::Start => {
+                let new = Node {
+                    left: None,
+                    right: None,
+                    inner: other,
+                };
+                let Some(start) = &mut self.start else {
+                    self.start = Some(Box::new(new));
+                    return Some(());
+                };
+
+                let mut new = Box::new(new);
+                mem::swap(&mut new, start);
+            }
+            InsertionPos::End => todo!(),
+            InsertionPos::Index(idx) => todo!(),
         }
+
+        Some(())
     }
 
-    fn delete<U>(&mut self, other: U)
-    where
-        T: AsRef<U>,
-    {
+    fn delete(&mut self, other: &T) -> T {
         todo!()
     }
 
     fn find(&self, other: &T) -> Option<usize> {
         todo!()
-    }
-
-    fn state(&self) -> Vec<&T> {
-        self.iter().collect::<Vec<_>>()
     }
 
     fn iter(&self) -> Iter<'_, T> {
@@ -58,29 +58,30 @@ impl<T> DoublyLinkedList<T> {
     }
 }
 
-impl<T> Default for DoublyLinkedList<T> {
-    fn default() -> Self {
-        Self::new()
+impl<U> From<U> for DoublyLinkedList<U::Item>
+where
+    U: IntoIterator,
+{
+    fn from(value: U) -> Self {
+        value.into_iter().fold(
+            Self {
+                start: None,
+                end: None,
+                _marker: PhantomData,
+            },
+            |mut accum, elem| {
+                accum.insert_at(elem, InsertionPos::Start);
+
+                accum
+            },
+        )
     }
 }
 
-impl<T, U, const N: usize> From<[U; N]> for DoublyLinkedList<T>
-where
-    T: Borrow<U>,
-    U: ToOwned<Owned = T>,
-{
-    fn from(value: [U; N]) -> Self {
-        let mut output = Self {
-            start: None,
-            end: None,
-            _marker: PhantomData,
-        };
-        value.into_iter().for_each(|elem| {
-            output.insert(elem.to_owned());
-        });
-
-        output
-    }
+enum InsertionPos {
+    Start,
+    End,
+    Index(usize),
 }
 
 struct Node<T> {
@@ -110,14 +111,41 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let list = DoublyLinkedList::from(["Something", "else"]);
+        macro_rules! insertion_test {
+            ($src:expr, $insertion:expr, $list:expr, $pos:expr) => {{
+                $src.insert_at($insertion, $pos);
+                assert!(
+                    $src.iter()
+                        .map(|elem| elem.as_bytes())
+                        .eq($list.iter().map(|elem| elem.as_bytes()))
+                );
+            }};
+        }
 
-        list.insert("Something else");
-        assert_eq!(list.state(), &["Something", "else", "Something else"]);
+        let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(list.find("else"), Some(1));
-        assert_eq!(list.find("nothing"), None);
+        insertion_test!(
+            list,
+            "Something else",
+            ["Something else", "Something", "else"],
+            InsertionPos::Start
+        );
+        insertion_test!(
+            list,
+            "Nothing",
+            ["Something else", "Something", "else", "Nothing",],
+            InsertionPos::End
+        );
+        insertion_test!(
+            list,
+            "NUMA",
+            ["Something else", "Something", "NUMA", "else", "Nothing",],
+            InsertionPos::Index(2)
+        );
 
-        assert_eq!(list.delete("Something"), String::from("Something"));
+        assert_eq!(list.find(&"else"), Some(1));
+        assert_eq!(list.find(&"nothing"), None);
+
+        assert_eq!(list.delete(&"Something"), "Something");
     }
 }
