@@ -1,19 +1,18 @@
 #![expect(dead_code, reason = "WIP.")]
 
-use std::{
-    cell::{Ref, RefCell},
-    marker::PhantomData,
-    ops::Deref,
-    rc::Rc,
-};
+use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 
+#[derive(Debug)]
 struct DoublyLinkedList<T> {
     start: Option<Rc<RefCell<Node<T>>>>,
     end: Option<Rc<RefCell<Node<T>>>>,
     _marker: PhantomData<T>,
 }
 
-impl<T> DoublyLinkedList<T> {
+impl<T> DoublyLinkedList<T>
+where
+    T: PartialEq,
+{
     fn new() -> Self {
         Self {
             start: None,
@@ -43,7 +42,7 @@ impl<T> DoublyLinkedList<T> {
                 start.borrow_mut().right = Some(Rc::new(RefCell::new(old)));
             }
             InsertionPos::End => {
-                let Some(end) = &self.end else {
+                let (Some(start), Some(end)) = (&mut self.start, &self.end) else {
                     self.start = Some(Rc::new(RefCell::new(new)));
                     self.end = Some(Rc::clone(self.start.as_ref().unwrap()));
 
@@ -52,7 +51,17 @@ impl<T> DoublyLinkedList<T> {
                 let mut old = end.replace(new);
 
                 old.right = Some(Rc::clone(end));
-                end.borrow_mut().left = Some(Rc::new(RefCell::new(old)));
+
+                if Rc::ptr_eq(start, end) {
+                    *start = Rc::new(RefCell::new(old));
+                    end.borrow_mut().left = Some(Rc::clone(start));
+                } else {
+                    let mut end = end.borrow();
+                    let mut prev_end = end.left.as_ref().unwrap().borrow_mut();
+
+                    prev_end.right = Some(Rc::new(RefCell::new(old)));
+                    end.left = Some(Rc::clone(prev_end.right.as_ref().unwrap()));
+                }
             }
             InsertionPos::Index(idx) => (),
         }
@@ -64,14 +73,10 @@ impl<T> DoublyLinkedList<T> {
         todo!()
     }
 
-    fn find(&self, other: &T) -> Option<usize> {
-        todo!()
-    }
-
     fn iter(&self) -> Iter<'_, T> {
         Iter {
-            first: self.start.as_ref().map(|elem| elem.as_ref().borrow()),
-            last: self.end.as_ref().map(|elem| elem.as_ref().borrow()),
+            first: self.start.as_ref().map(|elem| elem.as_ptr().cast_const()),
+            last: self.end.as_ref().map(|elem| elem.as_ptr().cast_const()),
             current: None,
             _marker: PhantomData,
         }
@@ -81,6 +86,7 @@ impl<T> DoublyLinkedList<T> {
 impl<U> From<U> for DoublyLinkedList<U::Item>
 where
     U: IntoIterator,
+    U::Item: PartialEq,
 {
     fn from(value: U) -> Self {
         value.into_iter().fold(
@@ -90,7 +96,7 @@ where
                 _marker: PhantomData,
             },
             |mut accum, elem| {
-                accum.insert_at(elem, InsertionPos::Start);
+                accum.insert_at(elem, InsertionPos::End);
 
                 accum
             },
@@ -104,21 +110,32 @@ enum InsertionPos {
     Index(usize),
 }
 
+#[derive(Debug)]
 struct Node<T> {
     left: Option<Rc<RefCell<Node<T>>>>,
     right: Option<Rc<RefCell<Node<T>>>>,
     inner: T,
 }
 
+impl<T> PartialEq for Node<T>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+#[derive(Debug)]
 struct Iter<'a, T> {
-    first: Option<Ref<'a, Node<T>>>,
-    last: Option<Ref<'a, Node<T>>>,
-    current: Option<Rc<Node<T>>>,
+    first: Option<*const Node<T>>,
+    last: Option<*const Node<T>>,
+    current: Option<*const Node<T>>,
     _marker: PhantomData<&'a T>,
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = Ref<'a, Node<T>>;
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.current {
@@ -126,14 +143,19 @@ impl<'a, T> Iterator for Iter<'a, T> {
                 let Some(first) = &self.first else {
                     return None;
                 };
-                let Some(last) = &self.last else {
+
+                self.current = Some(unsafe { &**first });
+            }
+            Some(item) => {
+                let Some(next) = &(unsafe { &*item }).right else {
                     return None;
                 };
+
+                self.current = Some(next.as_ptr().cast_const());
             }
-            Some(_) => todo!(),
         }
 
-        self.first.as_ref()
+        self.current.map(|elem| &(unsafe { &*elem }).inner)
     }
 }
 
@@ -144,10 +166,13 @@ mod tests {
     macro_rules! insertion_test {
         ($src:expr, $insertion:expr, $list:expr, $pos:expr) => {{
             $src.insert_at($insertion, $pos);
-            assert!(
-                $src.iter()
-                    .map(|elem| elem.as_bytes())
-                    .eq($list.iter().map(|elem| elem.as_bytes()))
+
+            assert_eq!(
+                $src.iter().map(|elem| elem.to_string()).collect::<Vec<_>>(),
+                $list
+                    .iter()
+                    .map(|elem| elem.to_string())
+                    .collect::<Vec<_>>()
             );
         }};
     }
@@ -199,8 +224,11 @@ mod tests {
     fn search() {
         let list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(list.find(&"else"), Some(1));
-        assert_eq!(list.find(&"nothing"), None);
+        assert_eq!(
+            list.iter().find(|elem| **elem == "else"),
+            Some("else").as_ref()
+        );
+        assert_eq!(list.iter().find(|elem| **elem == "nothing"), None.as_ref());
     }
 
     #[test]
