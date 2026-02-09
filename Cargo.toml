@@ -1,3 +1,17 @@
 [workspace]
 resolver = "3"
 members = ["challenges"]
+
+[workspace.lints.clippy]
+pedantic = "warn"
+cargo = "warn"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+description = "Crafting interpreters challenges."
+keywords = ["interpreters"]
+categories = ["algorithms"]
+repository = "https://github.com/dybucc/crafting-interpreters"
+license = "LGPL-2.1-only"
+readme = "./README.md"

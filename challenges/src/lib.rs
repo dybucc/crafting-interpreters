@@ -1,12 +1,22 @@
 #![expect(dead_code, reason = "WIP.")]
 
-use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, ops::ControlFlow, process::id, rc::Rc};
+
+use thiserror::Error;
 
 #[derive(Debug)]
 struct DoublyLinkedList<T> {
     start: Option<Rc<RefCell<Node<T>>>>,
     end: Option<Rc<RefCell<Node<T>>>>,
-    _marker: PhantomData<T>,
+}
+
+#[derive(Error, Debug)]
+enum InsertionError {
+    #[error("passed index {} out of bounds; only {} available", .wrong_index, .actual_elements)]
+    IndexOutOfBounds {
+        wrong_index: usize,
+        actual_elements: usize,
+    },
 }
 
 impl<T> DoublyLinkedList<T>
@@ -17,11 +27,30 @@ where
         Self {
             start: None,
             end: None,
-            _marker: PhantomData,
         }
     }
 
-    fn insert_at(&mut self, other: T, pos: InsertionPos) -> Option<()> {
+    fn insert_at(&mut self, other: T, pos: InsertionPos) -> Result<(), InsertionError>
+    where
+        T: Default,
+    {
+        fn init<T>(
+            new: Node<T>,
+            self_start: &mut Option<Rc<RefCell<Node<T>>>>,
+            self_end: &mut Option<Rc<RefCell<Node<T>>>>,
+        ) {
+            *self_start = Some(Rc::new(RefCell::new(new)));
+            *self_end = Some(Rc::clone(self_start.as_ref().unwrap()));
+        }
+
+        // Exists for the purposes of performing a folding operation on the
+        // container.
+        #[derive(Debug)]
+        enum DummyWrapper<T> {
+            Some(*const T),
+            None,
+        }
+
         let new = Node {
             left: None,
             right: None,
@@ -31,10 +60,8 @@ where
         match pos {
             InsertionPos::Start => {
                 let Some(start) = &self.start else {
-                    self.start = Some(Rc::new(RefCell::new(new)));
-                    self.end = Some(Rc::clone(self.start.as_ref().unwrap()));
-
-                    return Some(());
+                    init(new, &mut self.start, &mut self.end);
+                    return Ok(());
                 };
                 let mut old = start.replace(new);
 
@@ -43,30 +70,49 @@ where
             }
             InsertionPos::End => {
                 let (Some(start), Some(end)) = (&mut self.start, &self.end) else {
-                    self.start = Some(Rc::new(RefCell::new(new)));
-                    self.end = Some(Rc::clone(self.start.as_ref().unwrap()));
-
-                    return Some(());
+                    init(new, &mut self.start, &mut self.end);
+                    return Ok(());
                 };
                 let mut old = end.replace(new);
 
                 old.right = Some(Rc::clone(end));
+                old.left = Some(Rc::clone(start));
+
+                let old = Rc::new(RefCell::new(old));
 
                 if Rc::ptr_eq(start, end) {
-                    *start = Rc::new(RefCell::new(old));
+                    *start = old;
                     end.borrow_mut().left = Some(Rc::clone(start));
                 } else {
-                    let mut end = end.borrow();
-                    let mut prev_end = end.left.as_ref().unwrap().borrow_mut();
-
-                    prev_end.right = Some(Rc::new(RefCell::new(old)));
-                    end.left = Some(Rc::clone(prev_end.right.as_ref().unwrap()));
+                    end.borrow_mut().left = Some(Rc::clone(&old));
+                    start.borrow_mut().right = Some(old);
                 }
             }
-            InsertionPos::Index(idx) => (),
+            InsertionPos::Index(idx) => {
+                let Some(_) = &self.start else {
+                    init(new, &mut self.start, &mut self.end);
+                    return Ok(());
+                };
+
+                let dummy = DummyWrapper::None;
+                let Some(DummyWrapper::Some(elem)) = self
+                    .iter()
+                    .enumerate()
+                    .try_fold(dummy, |_, (actual_idx, elem)| {
+                        (actual_idx == idx).then_some(DummyWrapper::Some(elem))
+                    })
+                else {
+                    return Err(InsertionError::IndexOutOfBounds {
+                        wrong_index: idx,
+                        actual_elements: self.iter().count(),
+                    });
+                };
+
+                todo!("Handle cases where the index is correct.");
+            }
         }
 
-        Some(())
+        Ok(())
     }
 
     fn delete(&mut self, other: &T) -> T {
@@ -86,17 +132,19 @@ where
 impl<U> From<U> for DoublyLinkedList<U::Item>
 where
     U: IntoIterator,
-    U::Item: PartialEq,
+    U::Item: PartialEq + Default,
 {
     fn from(value: U) -> Self {
         value.into_iter().fold(
             Self {
                 start: None,
                 end: None,
-                _marker: PhantomData,
             },
             |mut accum, elem| {
-                accum.insert_at(elem, InsertionPos::End);
+                accum.insert_at(elem, InsertionPos::End).expect(
+                    "conversion shouldn't fail because only index-based insertion is prone to \
+                    failure",
+                );
 
                 accum
             },
@@ -104,6 +152,7 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
 enum InsertionPos {
     Start,
     End,
@@ -144,7 +193,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
                     return None;
                 };
 
-                self.current = Some(unsafe { &**first });
+                self.current = Some(&raw const **first);
             }
             Some(item) => {
                 let Some(next) = &(unsafe { &*item }).right else {
