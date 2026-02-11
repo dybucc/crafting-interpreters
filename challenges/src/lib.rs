@@ -1,6 +1,6 @@
 #![expect(dead_code, reason = "WIP.")]
 
-use std::{cell::RefCell, marker::PhantomData, ops::ControlFlow, process::id, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 
 use thiserror::Error;
 
@@ -39,16 +39,10 @@ where
             self_start: &mut Option<Rc<RefCell<Node<T>>>>,
             self_end: &mut Option<Rc<RefCell<Node<T>>>>,
         ) {
-            *self_start = Some(Rc::new(RefCell::new(new)));
-            *self_end = Some(Rc::clone(self_start.as_ref().unwrap()));
-        }
+            let new = Rc::new(RefCell::new(new));
 
-        // Exists for the purposes of performing a folding operation on the
-        // container.
-        #[derive(Debug)]
-        enum DummyWrapper<T> {
-            Some(*const T),
-            None,
+            *self_end = Some(Rc::clone(&new));
+            *self_start = Some(new);
         }
 
         let new = Node {
@@ -93,15 +87,7 @@ where
                     init(new, &mut self.start, &mut self.end);
                     return Ok(());
                 };
-
-                let dummy = DummyWrapper::None;
-                let Some(DummyWrapper::Some(elem)) = self
-                    .iter()
-                    .enumerate()
-                    .try_fold(dummy, |_, (actual_idx, elem)| {
-                        (actual_idx == idx).then_some(DummyWrapper::Some(elem))
-                    })
-                else {
+                let Some(elem) = self.ptr_iter().nth(idx) else {
                     return Err(InsertionError::IndexOutOfBounds {
                         wrong_index: idx,
                         actual_elements: self.iter().count(),
@@ -125,6 +111,14 @@ where
             last: self.end.as_ref().map(|elem| elem.as_ptr().cast_const()),
             current: None,
             _marker: PhantomData,
+        }
+    }
+
+    fn ptr_iter(&self) -> PtrIter<T> {
+        PtrIter {
+            start: self.start.clone(),
+            end: self.end.clone(),
+            current: 0,
         }
     }
 }
@@ -205,6 +199,38 @@ impl<'a, T> Iterator for Iter<'a, T> {
         }
 
         self.current.map(|elem| &(unsafe { &*elem }).inner)
+    }
+}
+
+struct PtrIter<T> {
+    start: Option<Rc<RefCell<Node<T>>>>,
+    end: Option<Rc<RefCell<Node<T>>>>,
+    current: usize,
+}
+
+impl<T> Iterator for PtrIter<T> {
+    type Item = Rc<RefCell<Node<T>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some(start) = &self.start else {
+            return None;
+        };
+        let mut counter = 1;
+        let mut indexer = Rc::clone(start);
+        let output = Some(loop {
+            if counter <= self.current
+                && let Some(next) = &Rc::clone(&indexer).borrow().right
+            {
+                indexer = Rc::clone(next);
+                counter += 1;
+            } else {
+                break indexer;
+            }
+        });
+
+        self.current += 1;
+
+        output
     }
 }
 
