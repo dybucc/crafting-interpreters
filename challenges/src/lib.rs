@@ -1,3 +1,4 @@
+#![feature(if_let_guard)]
 #![expect(dead_code, reason = "WIP.")]
 
 use std::{cell::RefCell, marker::PhantomData, rc::Rc};
@@ -21,7 +22,7 @@ enum InsertionError {
 
 impl<T> DoublyLinkedList<T>
 where
-    T: PartialEq,
+    T: PartialEq + Default,
 {
     fn new() -> Self {
         Self {
@@ -30,10 +31,7 @@ where
         }
     }
 
-    fn insert_at(&mut self, other: T, pos: InsertionPos) -> Result<(), InsertionError>
-    where
-        T: Default,
-    {
+    fn insert_at(&mut self, other: T, pos: InsertionPos) -> Result<(), InsertionError> {
         fn init<T>(
             new: Node<T>,
             self_start: &mut Option<Rc<RefCell<Node<T>>>>,
@@ -83,18 +81,30 @@ where
                 }
             }
             InsertionPos::Index(idx) => {
-                let Some(_) = &self.start else {
-                    init(new, &mut self.start, &mut self.end);
-                    return Ok(());
-                };
                 let Some(elem) = self.ptr_iter().nth(idx) else {
                     return Err(InsertionError::IndexOutOfBounds {
                         wrong_index: idx,
                         actual_elements: self.iter().count(),
                     });
                 };
+                let Some(end) = &mut self.end else {
+                    init(new, &mut self.start, &mut self.end);
+                    return Ok(());
+                };
+                let mut old = elem.replace(new);
 
-                todo!("Handle cases where the index is correct.");
+                old.left = Some(Rc::clone(&elem));
+                old.right.clone_from(&elem.borrow().right);
+
+                if let Some(ref right) = elem.borrow().right {
+                    right.borrow_mut().left = Some(Rc::new(RefCell::new(old)));
+                } else {
+                    elem.borrow_mut().right = Some(Rc::new(RefCell::new(old)));
+                }
+
+                if Rc::ptr_eq(&elem, end) {
+                    *end = Rc::clone(elem.borrow().right.as_ref().unwrap());
+                }
             }
         }
 
@@ -119,16 +129,17 @@ where
             start: self.start.clone(),
             end: self.end.clone(),
             current: 0,
+            current_indexer: None,
         }
     }
 }
 
-impl<U> From<U> for DoublyLinkedList<U::Item>
+impl<T> From<T> for DoublyLinkedList<T::Item>
 where
-    U: IntoIterator,
-    U::Item: PartialEq + Default,
+    T: IntoIterator,
+    T::Item: PartialEq + Default,
 {
-    fn from(value: U) -> Self {
+    fn from(value: T) -> Self {
         value.into_iter().fold(
             Self {
                 start: None,
@@ -206,6 +217,7 @@ struct PtrIter<T> {
     start: Option<Rc<RefCell<Node<T>>>>,
     end: Option<Rc<RefCell<Node<T>>>>,
     current: usize,
+    current_indexer: Option<Rc<RefCell<Node<T>>>>,
 }
 
 impl<T> Iterator for PtrIter<T> {
@@ -215,22 +227,16 @@ impl<T> Iterator for PtrIter<T> {
         let Some(start) = &self.start else {
             return None;
         };
-        let mut counter = 1;
-        let mut indexer = Rc::clone(start);
-        let output = Some(loop {
-            if counter <= self.current
-                && let Some(next) = &Rc::clone(&indexer).borrow().right
-            {
-                indexer = Rc::clone(next);
-                counter += 1;
-            } else {
-                break indexer;
+
+        match self.current_indexer {
+            None => self.current_indexer = Some(Rc::clone(start)),
+            Some(ref mut indexer) if let Some(ref right) = Rc::clone(indexer).borrow().right => {
+                *indexer = Rc::clone(right);
             }
-        });
+            _ => self.current_indexer = None,
+        }
 
-        self.current += 1;
-
-        output
+        self.current_indexer.as_ref().map(Rc::clone)
     }
 }
 
@@ -239,60 +245,81 @@ mod tests {
     use super::*;
 
     macro_rules! insertion_test {
-        ($src:expr, $insertion:expr, $list:expr, $pos:expr) => {{
-            $src.insert_at($insertion, $pos);
+        ($src:expr, $insertion:expr, $list:expr, $pos:expr$(,)?) => {{
+            $src.insert_at($insertion, $pos)?;
 
-            assert_eq!(
-                $src.iter().map(|elem| elem.to_string()).collect::<Vec<_>>(),
-                $list
-                    .iter()
+            assert!(
+                $src.iter()
                     .map(|elem| elem.to_string())
-                    .collect::<Vec<_>>()
+                    .eq($list.iter().map(|elem| elem.to_string())),
             );
         }};
     }
 
+    type InsertionResult = Result<(), InsertionError>;
+
     #[test]
-    fn insertion_at_start() {
+    fn insertion_at_start() -> InsertionResult {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
         insertion_test!(
             list,
             "Something else",
             ["Something else", "Something", "else"],
-            InsertionPos::Start
+            InsertionPos::Start,
         );
+
+        Ok(())
     }
 
     #[test]
-    fn insertion_at_end() {
+    fn insertion_at_end() -> InsertionResult {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
         insertion_test!(
             list,
             "Nothing",
             ["Something", "else", "Nothing",],
-            InsertionPos::End
+            InsertionPos::End,
         );
+
+        Ok(())
     }
 
     #[test]
-    fn insertion_at_idx_correct() {
+    fn insertion_at_idx_correct() -> InsertionResult {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
         insertion_test!(
             list,
             "NUMA",
             ["Something", "NUMA", "else"],
-            InsertionPos::Index(1)
+            InsertionPos::Index(1),
         );
+
+        Ok(())
     }
 
     #[test]
-    fn insertion_at_idx_incorrect() {
+    fn insertion_at_idx_incorrect() -> InsertionResult {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        todo!();
+        assert!(
+            list.insert_at("NUMA", InsertionPos::Index(10))
+                .is_err_and(|err| {
+                    if let InsertionError::IndexOutOfBounds {
+                        wrong_index,
+                        actual_elements,
+                    } = err
+                    {
+                        wrong_index == 10 && actual_elements == 2
+                    } else {
+                        false
+                    }
+                })
+        );
+
+        Ok(())
     }
 
     #[test]
