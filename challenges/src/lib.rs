@@ -84,7 +84,7 @@ where
                 let Some(elem) = self.ptr_iter().nth(idx) else {
                     return Err(InsertionError::IndexOutOfBounds {
                         wrong_index: idx,
-                        actual_elements: self.iter().count(),
+                        actual_elements: unsafe { self.iter() }.count(),
                     });
                 };
                 let Some(end) = &mut self.end else {
@@ -111,11 +111,53 @@ where
         Ok(())
     }
 
-    fn delete(&mut self, other: &T) -> T {
-        todo!()
+    fn delete(&mut self, other: &T) -> Option<T> {
+        let target = self.ptr_iter().find(|elem| elem.borrow().inner.eq(other))?;
+        let (Some(start), Some(end)) = (&mut self.start, &mut self.end) else {
+            return None;
+        };
+        let change = |target: &mut Option<Rc<RefCell<Node<T>>>>,
+                      possible_dir: &Option<Rc<RefCell<Node<T>>>>,
+                      change,
+                      change_src: &mut Rc<RefCell<Node<T>>>| {
+            target.clone_from(&if let Some(right) = possible_dir.as_ref() {
+                Some(Rc::clone(right))
+            } else {
+                change_src.clone_from(change); // Changes `start` or `end`.
+                None
+            });
+        };
+        let target_binding = target.borrow();
+
+        if let Some(left) = &target_binding.left {
+            change(
+                &mut left.borrow_mut().right,
+                &target.borrow().right,
+                left,
+                end,
+            );
+        }
+        if let Some(right) = &target_binding.right {
+            change(
+                &mut right.borrow_mut().left,
+                &target.borrow().left,
+                right,
+                start,
+            );
+        }
+
+        drop(target_binding);
+
+        let strong_count = Rc::strong_count(&target);
+        let Some(target) = Rc::into_inner(target) else {
+            eprintln!("strong_count: {strong_count}");
+            panic!("doesn't work as expected; WIP")
+        };
+
+        Some(target.into_inner().inner)
     }
 
-    fn iter(&self) -> Iter<'_, T> {
+    unsafe fn iter(&self) -> Iter<'_, T> {
         Iter {
             first: self.start.as_ref().map(|elem| elem.as_ptr().cast_const()),
             last: self.end.as_ref().map(|elem| elem.as_ptr().cast_const()),
@@ -181,7 +223,10 @@ where
 }
 
 #[derive(Debug)]
-struct Iter<'a, T> {
+struct Iter<'a, T>
+where
+    T: 'a,
+{
     first: Option<*const Node<T>>,
     last: Option<*const Node<T>>,
     current: Option<*const Node<T>>,
@@ -249,7 +294,7 @@ mod tests {
             $src.insert_at($insertion, $pos)?;
 
             assert!(
-                $src.iter()
+                unsafe { $src.iter() }
                     .map(|elem| elem.to_string())
                     .eq($list.iter().map(|elem| elem.to_string())),
             );
@@ -308,11 +353,11 @@ mod tests {
             list.insert_at("NUMA", InsertionPos::Index(10))
                 .is_err_and(|err| {
                     if let InsertionError::IndexOutOfBounds {
-                        wrong_index,
-                        actual_elements,
+                        wrong_index: 10,
+                        actual_elements: 2,
                     } = err
                     {
-                        wrong_index == 10 && actual_elements == 2
+                        true
                     } else {
                         false
                     }
@@ -327,16 +372,44 @@ mod tests {
         let list = DoublyLinkedList::from(["Something", "else"]);
 
         assert_eq!(
-            list.iter().find(|elem| **elem == "else"),
+            unsafe { list.iter() }.find(|elem| **elem == "else"),
             Some("else").as_ref()
         );
-        assert_eq!(list.iter().find(|elem| **elem == "nothing"), None.as_ref());
+        assert_eq!(
+            unsafe { list.iter() }.find(|elem| **elem == "nothing"),
+            None.as_ref()
+        );
     }
 
     #[test]
-    fn deletion() {
+    fn deletion_found() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(list.delete(&"Something"), "Something");
+        assert_eq!(list.delete(&"Something"), Some("Something"));
+        assert_eq!(
+            unsafe { list.iter() }
+                .map(|elem| elem.to_string())
+                .collect::<Vec<_>>(),
+            ["else"]
+                .iter()
+                .map(|elem| elem.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn deletion_not_found() {
+        let mut list = DoublyLinkedList::from(["Something", "else"]);
+
+        assert_eq!(list.delete(&"other"), None);
+        assert_eq!(
+            unsafe { list.iter() }
+                .map(|elem| elem.to_string())
+                .collect::<Vec<_>>(),
+            ["Something", "else"]
+                .iter()
+                .map(|elem| elem.to_string())
+                .collect::<Vec<_>>()
+        );
     }
 }
