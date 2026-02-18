@@ -1,14 +1,16 @@
 #![feature(if_let_guard)]
 #![expect(dead_code, reason = "WIP.")]
 
-use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+use std::{borrow::Borrow, cell::RefCell, marker::PhantomData, rc::Rc};
 
 use thiserror::Error;
 
+type Inner<T> = RefCell<Node<T>>;
+
 #[derive(Debug)]
 struct DoublyLinkedList<T> {
-    start: Option<Rc<RefCell<Node<T>>>>,
-    end: Option<Rc<RefCell<Node<T>>>>,
+    start: Option<Rc<Inner<T>>>,
+    end: Option<Rc<Inner<T>>>,
 }
 
 #[derive(Error, Debug)]
@@ -31,18 +33,18 @@ where
         }
     }
 
-    fn insert_at(&mut self, other: T, pos: InsertionPos) -> Result<(), InsertionError> {
-        fn init<T>(
-            new: Node<T>,
-            self_start: &mut Option<Rc<RefCell<Node<T>>>>,
-            self_end: &mut Option<Rc<RefCell<Node<T>>>>,
-        ) {
-            let new = Rc::new(RefCell::new(new));
+    fn init(
+        new: Node<T>,
+        self_start: &mut Option<Rc<Inner<T>>>,
+        self_end: &mut Option<Rc<Inner<T>>>,
+    ) {
+        let new = Rc::new(RefCell::new(new));
 
-            *self_end = Some(Rc::clone(&new));
-            *self_start = Some(new);
-        }
+        *self_end = Some(Rc::clone(&new));
+        *self_start = Some(new);
+    }
 
+    pub fn insert_at(&mut self, other: T, pos: InsertionPos) {
         let new = Node {
             left: None,
             right: None,
@@ -52,8 +54,7 @@ where
         match pos {
             InsertionPos::Start => {
                 let Some(start) = &self.start else {
-                    init(new, &mut self.start, &mut self.end);
-                    return Ok(());
+                    return Self::init(new, &mut self.start, &mut self.end);
                 };
                 let mut old = start.replace(new);
 
@@ -62,8 +63,7 @@ where
             }
             InsertionPos::End => {
                 let (Some(start), Some(end)) = (&mut self.start, &self.end) else {
-                    init(new, &mut self.start, &mut self.end);
-                    return Ok(());
+                    return Self::init(new, &mut self.start, &mut self.end);
                 };
                 let mut old = end.replace(new);
 
@@ -80,78 +80,63 @@ where
                     start.borrow_mut().right = Some(old);
                 }
             }
-            InsertionPos::Index(idx) => {
-                let Some(elem) = self.ptr_iter().nth(idx) else {
-                    return Err(InsertionError::IndexOutOfBounds {
-                        wrong_index: idx,
-                        actual_elements: unsafe { self.iter() }.count(),
-                    });
-                };
-                let Some(end) = &mut self.end else {
-                    init(new, &mut self.start, &mut self.end);
-                    return Ok(());
-                };
-                let mut old = elem.replace(new);
+        }
+    }
 
-                old.left = Some(Rc::clone(&elem));
-                old.right.clone_from(&elem.borrow().right);
+    pub fn insert_at_idx(&mut self, other: T, idx: usize) -> Result<(), InsertionError> {
+        let new = Node {
+            left: None,
+            right: None,
+            inner: other,
+        };
+        let Some(elem) = self.ptr_iter().nth(idx) else {
+            return Err(InsertionError::IndexOutOfBounds {
+                wrong_index: idx,
+                actual_elements: (unsafe { self.iter() }).count(),
+            });
+        };
+        let Some(end) = &mut self.end else {
+            Self::init(new, &mut self.start, &mut self.end);
+            return Ok(());
+        };
+        let mut old = elem.replace(new);
 
-                if let Some(ref right) = elem.borrow().right {
-                    right.borrow_mut().left = Some(Rc::new(RefCell::new(old)));
-                } else {
-                    elem.borrow_mut().right = Some(Rc::new(RefCell::new(old)));
-                }
+        old.left = Some(Rc::clone(&elem));
+        old.right.clone_from(&RefCell::borrow(&elem).right);
 
-                if Rc::ptr_eq(&elem, end) {
-                    *end = Rc::clone(elem.borrow().right.as_ref().unwrap());
-                }
-            }
+        if let Some(ref right) = RefCell::borrow(&elem).right {
+            right.borrow_mut().left = Some(Rc::new(RefCell::new(old)));
+        } else {
+            elem.borrow_mut().right = Some(Rc::new(RefCell::new(old)));
+        }
+
+        if Rc::ptr_eq(&elem, end) {
+            *end = Rc::clone(RefCell::borrow(&elem).right.as_ref().unwrap());
         }
 
         Ok(())
     }
 
-    fn delete(&mut self, other: &T) -> Option<T> {
-        let target = self.ptr_iter().find(|elem| elem.borrow().inner.eq(other))?;
+    pub fn delete<Q>(&mut self, other: &Q) -> Option<T>
+    where
+        T: Borrow<Q>,
+        Q: PartialEq + ?Sized,
+    {
+        let target = self
+            .ptr_iter()
+            .find(|elem| RefCell::borrow(elem).inner.borrow().eq(other))?;
         let (Some(start), Some(end)) = (&mut self.start, &mut self.end) else {
             return None;
         };
-        let change = |target: &mut Option<Rc<RefCell<Node<T>>>>,
-                      possible_dir: &Option<Rc<RefCell<Node<T>>>>,
-                      change,
-                      change_src: &mut Rc<RefCell<Node<T>>>| {
-            target.clone_from(&if let Some(right) = possible_dir.as_ref() {
-                Some(Rc::clone(right))
-            } else {
-                change_src.clone_from(change); // Changes `start` or `end`.
-                None
-            });
-        };
-        let target_binding = target.borrow();
 
-        if let Some(left) = &target_binding.left {
-            change(
-                &mut left.borrow_mut().right,
-                &target.borrow().right,
-                left,
-                end,
-            );
-        }
-        if let Some(right) = &target_binding.right {
-            change(
-                &mut right.borrow_mut().left,
-                &target.borrow().left,
-                right,
-                start,
-            );
-        }
+        // TODO: rearrange the pointers to leave only a single reference to
+        //       the element about to be removed.
 
-        drop(target_binding);
+        eprintln!("start strong_count: {}", Rc::strong_count(start));
+        eprintln!("end strong_count: {}", Rc::strong_count(end));
 
-        let strong_count = Rc::strong_count(&target);
         let Some(target) = Rc::into_inner(target) else {
-            eprintln!("strong_count: {strong_count}");
-            panic!("doesn't work as expected; WIP")
+            panic!("`target` should only have a single reference at this point");
         };
 
         Some(target.into_inner().inner)
@@ -176,26 +161,26 @@ where
     }
 }
 
+impl<T> Default for DoublyLinkedList<T>
+where
+    T: PartialEq + Default,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> From<T> for DoublyLinkedList<T::Item>
 where
     T: IntoIterator,
     T::Item: PartialEq + Default,
 {
     fn from(value: T) -> Self {
-        value.into_iter().fold(
-            Self {
-                start: None,
-                end: None,
-            },
-            |mut accum, elem| {
-                accum.insert_at(elem, InsertionPos::End).expect(
-                    "conversion shouldn't fail because only index-based insertion is prone to \
-                    failure",
-                );
+        value.into_iter().fold(Self::new(), |mut accum, elem| {
+            accum.insert_at(elem, InsertionPos::End);
 
-                accum
-            },
-        )
+            accum
+        })
     }
 }
 
@@ -203,7 +188,6 @@ where
 enum InsertionPos {
     Start,
     End,
-    Index(usize),
 }
 
 #[derive(Debug)]
@@ -275,7 +259,9 @@ impl<T> Iterator for PtrIter<T> {
 
         match self.current_indexer {
             None => self.current_indexer = Some(Rc::clone(start)),
-            Some(ref mut indexer) if let Some(ref right) = Rc::clone(indexer).borrow().right => {
+            Some(ref mut indexer)
+                if let Some(ref right) = RefCell::borrow(&Rc::clone(indexer)).right =>
+            {
                 *indexer = Rc::clone(right);
             }
             _ => self.current_indexer = None,
@@ -287,19 +273,9 @@ impl<T> Iterator for PtrIter<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::string::ToString;
+
     use super::*;
-
-    macro_rules! insertion_test {
-        ($src:expr, $insertion:expr, $list:expr, $pos:expr$(,)?) => {{
-            $src.insert_at($insertion, $pos)?;
-
-            assert!(
-                unsafe { $src.iter() }
-                    .map(|elem| elem.to_string())
-                    .eq($list.iter().map(|elem| elem.to_string())),
-            );
-        }};
-    }
 
     type InsertionResult = Result<(), InsertionError>;
 
@@ -307,11 +283,12 @@ mod tests {
     fn insertion_at_start() -> InsertionResult {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        insertion_test!(
-            list,
-            "Something else",
-            ["Something else", "Something", "else"],
-            InsertionPos::Start,
+        list.insert_at("Something else", InsertionPos::Start);
+        assert_eq!(
+            (unsafe { list.iter() })
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["Something else", "Something", "else"]
         );
 
         Ok(())
@@ -321,15 +298,19 @@ mod tests {
     fn insertion_at_end() -> InsertionResult {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        insertion_test!(
-            list,
-            "Nothing",
-            ["Something", "else", "Nothing",],
-            InsertionPos::End,
+        list.insert_at("Nothing", InsertionPos::End);
+        assert_eq!(
+            (unsafe { list.iter() }
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()),
+            ["Something", "else", "Nothing",]
         );
 
         Ok(())
     }
+
+    // TODO: get rid of the rest of uses of the macro and possibly make a new
+    // one.
 
     #[test]
     fn insertion_at_idx_correct() -> InsertionResult {
@@ -346,25 +327,21 @@ mod tests {
     }
 
     #[test]
-    fn insertion_at_idx_incorrect() -> InsertionResult {
+    fn insertion_at_idx_incorrect() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
         assert!(
             list.insert_at("NUMA", InsertionPos::Index(10))
                 .is_err_and(|err| {
-                    if let InsertionError::IndexOutOfBounds {
-                        wrong_index: 10,
-                        actual_elements: 2,
-                    } = err
-                    {
-                        true
-                    } else {
-                        false
-                    }
+                    matches!(
+                        err,
+                        InsertionError::IndexOutOfBounds {
+                            wrong_index: 10,
+                            actual_elements: 2,
+                        }
+                    )
                 })
         );
-
-        Ok(())
     }
 
     #[test]
@@ -372,11 +349,11 @@ mod tests {
         let list = DoublyLinkedList::from(["Something", "else"]);
 
         assert_eq!(
-            unsafe { list.iter() }.find(|elem| **elem == "else"),
+            (unsafe { list.iter() }).find(|elem| **elem == "else"),
             Some("else").as_ref()
         );
         assert_eq!(
-            unsafe { list.iter() }.find(|elem| **elem == "nothing"),
+            (unsafe { list.iter() }).find(|elem| **elem == "nothing"),
             None.as_ref()
         );
     }
@@ -385,15 +362,12 @@ mod tests {
     fn deletion_found() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(list.delete(&"Something"), Some("Something"));
+        assert_eq!(list.delete("Something"), Some("Something"));
         assert_eq!(
-            unsafe { list.iter() }
-                .map(|elem| elem.to_string())
+            (unsafe { list.iter() })
+                .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            ["else"]
-                .iter()
-                .map(|elem| elem.to_string())
-                .collect::<Vec<_>>()
+            ["else"].iter().map(ToString::to_string).collect::<Vec<_>>()
         );
     }
 
@@ -401,14 +375,14 @@ mod tests {
     fn deletion_not_found() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(list.delete(&"other"), None);
+        assert_eq!(list.delete("other"), None);
         assert_eq!(
-            unsafe { list.iter() }
-                .map(|elem| elem.to_string())
+            (unsafe { list.iter() })
+                .map(ToString::to_string)
                 .collect::<Vec<_>>(),
             ["Something", "else"]
                 .iter()
-                .map(|elem| elem.to_string())
+                .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
     }
