@@ -1,4 +1,3 @@
-#![feature(if_let_guard)]
 #![expect(dead_code, reason = "WIP.")]
 
 use std::{borrow::Borrow, cell::RefCell, marker::PhantomData, rc::Rc};
@@ -8,13 +7,13 @@ use thiserror::Error;
 type Inner<T> = RefCell<Node<T>>;
 
 #[derive(Debug)]
-struct DoublyLinkedList<T> {
+pub struct DoublyLinkedList<T> {
     start: Option<Rc<Inner<T>>>,
     end: Option<Rc<Inner<T>>>,
 }
 
 #[derive(Error, Debug)]
-enum InsertionError {
+pub enum InsertionError {
     #[error("passed index {} out of bounds; only {} available", .wrong_index, .actual_elements)]
     IndexOutOfBounds {
         wrong_index: usize,
@@ -26,22 +25,22 @@ impl<T> DoublyLinkedList<T>
 where
     T: PartialEq + Default,
 {
-    fn new() -> Self {
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "It's not a bug for a list to be discarded."
+    )]
+    pub fn new() -> Self {
         Self {
             start: None,
             end: None,
         }
     }
 
-    fn init(
-        new: Node<T>,
-        self_start: &mut Option<Rc<Inner<T>>>,
-        self_end: &mut Option<Rc<Inner<T>>>,
-    ) {
+    fn init_empty(&mut self, new: Node<T>) {
         let new = Rc::new(RefCell::new(new));
 
-        *self_end = Some(Rc::clone(&new));
-        *self_start = Some(new);
+        self.end = Some(Rc::clone(&new));
+        self.start = Some(new);
     }
 
     pub fn insert_at(&mut self, other: T, pos: InsertionPos) {
@@ -54,7 +53,7 @@ where
         match pos {
             InsertionPos::Start => {
                 let Some(start) = &self.start else {
-                    return Self::init(new, &mut self.start, &mut self.end);
+                    return self.init_empty(new);
                 };
                 let mut old = start.replace(new);
 
@@ -63,7 +62,7 @@ where
             }
             InsertionPos::End => {
                 let (Some(start), Some(end)) = (&mut self.start, &self.end) else {
-                    return Self::init(new, &mut self.start, &mut self.end);
+                    return self.init_empty(new);
                 };
                 let mut old = end.replace(new);
 
@@ -96,7 +95,7 @@ where
             });
         };
         let Some(end) = &mut self.end else {
-            Self::init(new, &mut self.start, &mut self.end);
+            self.init_empty(new);
             return Ok(());
         };
         let mut old = elem.replace(new);
@@ -117,23 +116,76 @@ where
         Ok(())
     }
 
+    pub fn find<Q>(&self, other: &Q) -> Option<Rc<Inner<T>>>
+    where
+        T: Borrow<Q>,
+        Q: PartialEq + ?Sized,
+    {
+        self.ptr_iter()
+            .find(|elem| RefCell::borrow(elem).inner.borrow().eq(other))
+    }
+
     pub fn delete<Q>(&mut self, other: &Q) -> Option<T>
     where
         T: Borrow<Q>,
         Q: PartialEq + ?Sized,
     {
-        let target = self
-            .ptr_iter()
-            .find(|elem| RefCell::borrow(elem).inner.borrow().eq(other))?;
+        #![expect(clippy::unit_arg, reason = "I want C++ style.")]
+
+        fn rearrange_start<T>(start: &mut Rc<Inner<T>>) -> Option<()> {
+            let right = if let Some(right) = &RefCell::borrow(start).right {
+                Rc::clone(right)
+            } else {
+                return None;
+            };
+
+            Some(*start = right)
+        }
+        fn rearrange_end<T>(end: &mut Rc<Inner<T>>) -> Option<()> {
+            let left = if let Some(left) = &RefCell::borrow(end).left {
+                Rc::clone(left)
+            } else {
+                return None;
+            };
+
+            Some(*end = left)
+        }
+        fn rearrange_left<T>(left: &Rc<Inner<T>>, target: &Inner<T>) {
+            RefCell::borrow_mut(left)
+                .right
+                .clone_from(&RefCell::borrow(target).right);
+        }
+        fn rearrange_right<T>(right: &Rc<Inner<T>>, target: &Inner<T>) {
+            RefCell::borrow_mut(right)
+                .left
+                .clone_from(&RefCell::borrow(target).left);
+        }
+
+        let target = self.find(other)?;
         let (Some(start), Some(end)) = (&mut self.start, &mut self.end) else {
             return None;
         };
 
-        // TODO: rearrange the pointers to leave only a single reference to
-        //       the element about to be removed.
+        eprintln!("strong_count for start: {}", Rc::strong_count(start));
+        eprintln!("strong_count for end: {}", Rc::strong_count(end));
 
-        eprintln!("start strong_count: {}", Rc::strong_count(start));
-        eprintln!("end strong_count: {}", Rc::strong_count(end));
+        if Rc::ptr_eq(start, &target)
+            && let None = rearrange_start(start)
+        {
+            self.start = None;
+        }
+        if Rc::ptr_eq(end, &target)
+            && let None = rearrange_end(end)
+        {
+            self.end = None;
+        }
+
+        if let Some(left) = &RefCell::borrow(&target).left {
+            rearrange_left(left, &target);
+        }
+        if let Some(right) = &RefCell::borrow(&target).right {
+            rearrange_right(right, &target);
+        }
 
         let Some(target) = Rc::into_inner(target) else {
             panic!("`target` should only have a single reference at this point");
@@ -142,6 +194,8 @@ where
         Some(target.into_inner().inner)
     }
 
+    // TODO: get rid of the unsafe qualifier as the iterator holds a reference
+    //       into the container and should be fairly harmless.
     unsafe fn iter(&self) -> Iter<'_, T> {
         Iter {
             first: self.start.as_ref().map(|elem| elem.as_ptr().cast_const()),
@@ -153,11 +207,24 @@ where
 
     fn ptr_iter(&self) -> PtrIter<T> {
         PtrIter {
+            // The below use a method-type clone instead of an
+            // associated-function approach because start and end are wrapped in
+            // `Option`s.
             start: self.start.clone(),
             end: self.end.clone(),
             current: 0,
             current_indexer: None,
         }
+    }
+}
+
+// TODO: get the implementation done.
+
+impl<'a, T> IntoIterator for DoublyLinkedList<T> {
+    type Item = <Iter<'a, T> as Iterator>::Item;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter
     }
 }
 
@@ -185,13 +252,13 @@ where
 }
 
 #[derive(Clone, Copy)]
-enum InsertionPos {
+pub enum InsertionPos {
     Start,
     End,
 }
 
 #[derive(Debug)]
-struct Node<T> {
+pub struct Node<T> {
     left: Option<Rc<RefCell<Node<T>>>>,
     right: Option<Rc<RefCell<Node<T>>>>,
     inner: T,
@@ -207,10 +274,7 @@ where
 }
 
 #[derive(Debug)]
-struct Iter<'a, T>
-where
-    T: 'a,
-{
+struct Iter<'a, T> {
     first: Option<*const Node<T>>,
     last: Option<*const Node<T>>,
     current: Option<*const Node<T>>,
@@ -277,113 +341,129 @@ mod tests {
 
     use super::*;
 
-    type InsertionResult = Result<(), InsertionError>;
+    macro_rules! insertion_test {
+        ($list:expr, $new:expr, $pos:expr, $test:expr$(,)?) => {{
+            $list.insert_at($new, $pos);
+            assert_eq!(
+                (unsafe { $list.iter() })
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                $test
+            );
+        }};
+    }
 
-    #[test]
-    fn insertion_at_start() -> InsertionResult {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
+    macro_rules! search_test {
+        ($list:expr, Some($test:expr) $(,)?) => {{
+            assert_eq!(
+                (unsafe { $list.iter() }).find(|elem| **elem == $test),
+                Some(&$test)
+            )
+        }};
+        ($list:expr, None($test:expr) $(,)?) => {{ assert_eq!((unsafe { $list.iter() }).find(|elem| **elem == $test), None) }};
+    }
 
-        list.insert_at("Something else", InsertionPos::Start);
-        assert_eq!(
-            (unsafe { list.iter() })
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-            ["Something else", "Something", "else"]
-        );
-
-        Ok(())
+    macro_rules! deletion_test {
+        ($list:expr, Some($test:expr), $state:expr$(,)?) => {{
+            assert_eq!($list.delete($test), Some($test));
+            assert_eq!(
+                (unsafe { $list.iter() })
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                $state
+            );
+        }};
+        ($list:expr, None($test:expr), $state:expr$(,)?) => {{
+            assert_eq!($list.delete($test), None);
+            assert_eq!(
+                (unsafe { $list.iter() })
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                $state
+            );
+        }};
     }
 
     #[test]
-    fn insertion_at_end() -> InsertionResult {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
-
-        list.insert_at("Nothing", InsertionPos::End);
-        assert_eq!(
-            (unsafe { list.iter() }
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()),
-            ["Something", "else", "Nothing",]
-        );
-
-        Ok(())
-    }
-
-    // TODO: get rid of the rest of uses of the macro and possibly make a new
-    // one.
-
-    #[test]
-    fn insertion_at_idx_correct() -> InsertionResult {
+    fn insertion_at_start() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
         insertion_test!(
             list,
-            "NUMA",
-            ["Something", "NUMA", "else"],
-            InsertionPos::Index(1),
+            "Something else",
+            InsertionPos::Start,
+            ["Something else", "Something", "else"]
         );
+    }
 
-        Ok(())
+    #[test]
+    fn insertion_at_end() {
+        let mut list = DoublyLinkedList::from(["Something", "else"]);
+
+        insertion_test!(
+            list,
+            "Nothing",
+            InsertionPos::End,
+            ["Something", "else", "Nothing"]
+        );
+    }
+
+    #[test]
+    fn insertion_at_idx_correct() {
+        let mut list = DoublyLinkedList::from(["Something", "else"]);
+
+        let _ = list.insert_at_idx("NUMA", 1);
+        assert_eq!(
+            (unsafe { list.iter() })
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["Something", "NUMA", "else"]
+        );
     }
 
     #[test]
     fn insertion_at_idx_incorrect() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert!(
-            list.insert_at("NUMA", InsertionPos::Index(10))
-                .is_err_and(|err| {
-                    matches!(
-                        err,
-                        InsertionError::IndexOutOfBounds {
-                            wrong_index: 10,
-                            actual_elements: 2,
-                        }
-                    )
-                })
-        );
+        assert!(list.insert_at_idx("NUMA", 10).is_err_and(|err| {
+            matches!(
+                err,
+                InsertionError::IndexOutOfBounds {
+                    wrong_index: 10,
+                    actual_elements: 2,
+                }
+            )
+        }));
     }
 
     #[test]
-    fn search() {
+    fn search_found() {
         let list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(
-            (unsafe { list.iter() }).find(|elem| **elem == "else"),
-            Some("else").as_ref()
-        );
-        assert_eq!(
-            (unsafe { list.iter() }).find(|elem| **elem == "nothing"),
-            None.as_ref()
-        );
+        search_test!(list, Some("else"));
     }
+
+    #[test]
+    fn search_not_found() {
+        let list = DoublyLinkedList::from(["Something", "else"]);
+
+        search_test!(list, None("nothing"));
+    }
+
+    // TODO: find out why the below tests don't seem to run at all (not even a
+    // logic error.)
 
     #[test]
     fn deletion_found() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(list.delete("Something"), Some("Something"));
-        assert_eq!(
-            (unsafe { list.iter() })
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-            ["else"].iter().map(ToString::to_string).collect::<Vec<_>>()
-        );
+        deletion_test!(list, Some("Something"), ["else"]);
     }
 
     #[test]
     fn deletion_not_found() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
 
-        assert_eq!(list.delete("other"), None);
-        assert_eq!(
-            (unsafe { list.iter() })
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-            ["Something", "else"]
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        );
+        deletion_test!(list, None("other"), ["Something", "else"]);
     }
 }
