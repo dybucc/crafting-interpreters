@@ -1,6 +1,6 @@
 #![expect(dead_code, reason = "WIP.")]
 
-use std::{borrow::Borrow, cell::RefCell, marker::PhantomData, rc::Rc};
+use std::{borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, rc::Rc};
 
 use thiserror::Error;
 
@@ -21,10 +21,7 @@ pub enum InsertionError {
     },
 }
 
-impl<T> DoublyLinkedList<T>
-where
-    T: PartialEq + Default,
-{
+impl<T: PartialEq + Default> DoublyLinkedList<T> {
     #[expect(
         clippy::must_use_candidate,
         reason = "It's not a bug for a list to be discarded."
@@ -43,22 +40,49 @@ where
         self.start = Some(new);
     }
 
-    pub fn insert_at(&mut self, other: T, pos: InsertionPos) {
+    pub fn insert_at(&mut self, other: T, pos: InsertionPos)
+    where
+        T: Debug,
+    {
         let new = Node {
             left: None,
             right: None,
             inner: other,
         };
 
+        // TODO: finish fixing up insertion op as the tests for start and end
+        // insertion don't seem to work.
+
+        eprintln!("state of the list: {:?}", self.iter().collect::<Vec<_>>());
+
         match pos {
             InsertionPos::Start => {
-                let Some(start) = &self.start else {
+                let (Some(start), Some(end)) = (&self.start, &mut self.end) else {
                     return self.init_empty(new);
                 };
                 let mut old = start.replace(new);
 
                 old.left = Some(Rc::clone(start));
-                start.borrow_mut().right = Some(Rc::new(RefCell::new(old)));
+                old.right.clone_from(&RefCell::borrow(start).right);
+
+                let old = Rc::new(RefCell::new(old));
+
+                if Rc::ptr_eq(start, end) {
+                    *end = old;
+                    start.borrow_mut().right = Some(Rc::clone(end));
+                } else {
+                    start
+                        .borrow_mut()
+                        .right
+                        .as_ref()
+                        .expect(
+                            "if `start` is not equivalent to `end` then surely there's something \
+                            to the right of `start`",
+                        )
+                        .borrow_mut()
+                        .left = Some(Rc::clone(&old));
+                    start.borrow_mut().right = Some(old);
+                }
             }
             InsertionPos::End => {
                 let (Some(start), Some(end)) = (&mut self.start, &self.end) else {
@@ -67,7 +91,7 @@ where
                 let mut old = end.replace(new);
 
                 old.right = Some(Rc::clone(end));
-                old.left = Some(Rc::clone(start));
+                old.left.clone_from(&RefCell::borrow(end).left);
 
                 let old = Rc::new(RefCell::new(old));
 
@@ -75,8 +99,16 @@ where
                     *start = old;
                     end.borrow_mut().left = Some(Rc::clone(start));
                 } else {
-                    end.borrow_mut().left = Some(Rc::clone(&old));
-                    start.borrow_mut().right = Some(old);
+                    end.borrow_mut()
+                        .left
+                        .as_ref()
+                        .expect(
+                            "if `end` is not equivalent to `start` then surely there's something \
+                            to the left of `end`",
+                        )
+                        .borrow_mut()
+                        .right = Some(Rc::clone(&old));
+                    end.borrow_mut().left = Some(old);
                 }
             }
         }
@@ -91,7 +123,7 @@ where
         let Some(elem) = self.ptr_iter().nth(idx) else {
             return Err(InsertionError::IndexOutOfBounds {
                 wrong_index: idx,
-                actual_elements: (unsafe { self.iter() }).count(),
+                actual_elements: self.iter().count(),
             });
         };
         let Some(end) = &mut self.end else {
@@ -116,19 +148,24 @@ where
         Ok(())
     }
 
-    pub fn find<Q>(&self, other: &Q) -> Option<Rc<Inner<T>>>
+    pub fn find<Q: PartialEq + ?Sized>(&self, other: &Q) -> Option<&T>
     where
         T: Borrow<Q>,
-        Q: PartialEq + ?Sized,
+    {
+        self.iter().find(|&elem| elem.borrow() == other)
+    }
+
+    fn find_ptr<Q: PartialEq + ?Sized>(&self, other: &Q) -> Option<Rc<Inner<T>>>
+    where
+        T: Borrow<Q>,
     {
         self.ptr_iter()
             .find(|elem| RefCell::borrow(elem).inner.borrow().eq(other))
     }
 
-    pub fn delete<Q>(&mut self, other: &Q) -> Option<T>
+    pub fn delete<Q: PartialEq + ?Sized>(&mut self, other: &Q) -> Option<T>
     where
-        T: Borrow<Q>,
-        Q: PartialEq + ?Sized,
+        T: Borrow<Q> + Debug,
     {
         #![expect(clippy::unit_arg, reason = "I want C++ style.")]
 
@@ -161,13 +198,10 @@ where
                 .clone_from(&RefCell::borrow(target).left);
         }
 
-        let target = self.find(other)?;
+        let target = self.find_ptr(other)?;
         let (Some(start), Some(end)) = (&mut self.start, &mut self.end) else {
             return None;
         };
-
-        eprintln!("strong_count for start: {}", Rc::strong_count(start));
-        eprintln!("strong_count for end: {}", Rc::strong_count(end));
 
         if Rc::ptr_eq(start, &target)
             && let None = rearrange_start(start)
@@ -194,9 +228,11 @@ where
         Some(target.into_inner().inner)
     }
 
-    // TODO: get rid of the unsafe qualifier as the iterator holds a reference
-    //       into the container and should be fairly harmless.
-    unsafe fn iter(&self) -> Iter<'_, T> {
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "It's not a bug not to use the result of this method."
+    )]
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             first: self.start.as_ref().map(|elem| elem.as_ptr().cast_const()),
             last: self.end.as_ref().map(|elem| elem.as_ptr().cast_const()),
@@ -207,9 +243,8 @@ where
 
     fn ptr_iter(&self) -> PtrIter<T> {
         PtrIter {
-            // The below use a method-type clone instead of an
-            // associated-function approach because start and end are wrapped in
-            // `Option`s.
+            // The below use a method-type clone instead of an associated
+            // function approach because start and end are wrapped in `Option`s.
             start: self.start.clone(),
             end: self.end.clone(),
             current: 0,
@@ -218,32 +253,24 @@ where
     }
 }
 
-// TODO: get the implementation done.
-
-impl<'a, T> IntoIterator for DoublyLinkedList<T> {
+impl<'a, T: PartialEq + Default> IntoIterator for &'a DoublyLinkedList<T> {
     type Item = <Iter<'a, T> as Iterator>::Item;
+    type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.iter
+        self.iter()
     }
 }
 
-impl<T> Default for DoublyLinkedList<T>
-where
-    T: PartialEq + Default,
-{
+impl<T: PartialEq + Default> Default for DoublyLinkedList<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T> From<T> for DoublyLinkedList<T::Item>
-where
-    T: IntoIterator,
-    T::Item: PartialEq + Default,
-{
+impl<T: IntoIterator<Item: PartialEq + Default + Debug>> From<T> for DoublyLinkedList<T::Item> {
     fn from(value: T) -> Self {
-        value.into_iter().fold(Self::new(), |mut accum, elem| {
+        value.into_iter().fold(Self::default(), |mut accum, elem| {
             accum.insert_at(elem, InsertionPos::End);
 
             accum
@@ -264,17 +291,14 @@ pub struct Node<T> {
     inner: T,
 }
 
-impl<T> PartialEq for Node<T>
-where
-    T: PartialEq,
-{
+impl<T: PartialEq> PartialEq for Node<T> {
     fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
 }
 
 #[derive(Debug)]
-struct Iter<'a, T> {
+pub struct Iter<'a, T: 'a> {
     first: Option<*const Node<T>>,
     last: Option<*const Node<T>>,
     current: Option<*const Node<T>>,
@@ -286,13 +310,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.current {
-            None => {
-                let Some(first) = &self.first else {
-                    return None;
-                };
-
-                self.current = Some(&raw const **first);
-            }
+            None => self.current = Some(self.first?),
             Some(item) => {
                 let Some(next) = &(unsafe { &*item }).right else {
                     return None;
@@ -345,40 +363,29 @@ mod tests {
         ($list:expr, $new:expr, $pos:expr, $test:expr$(,)?) => {{
             $list.insert_at($new, $pos);
             assert_eq!(
-                (unsafe { $list.iter() })
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
+                $list.iter().map(ToString::to_string).collect::<Vec<_>>(),
                 $test
             );
         }};
     }
 
     macro_rules! search_test {
-        ($list:expr, Some($test:expr) $(,)?) => {{
-            assert_eq!(
-                (unsafe { $list.iter() }).find(|elem| **elem == $test),
-                Some(&$test)
-            )
-        }};
-        ($list:expr, None($test:expr) $(,)?) => {{ assert_eq!((unsafe { $list.iter() }).find(|elem| **elem == $test), None) }};
+        ($list:expr, Some($test:expr) $(,)?) => {{ assert_eq!($list.find($test), Some(&$test)) }};
+        ($list:expr, None($test:expr) $(,)?) => {{ assert_eq!($list.find($test), None) }};
     }
 
     macro_rules! deletion_test {
         ($list:expr, Some($test:expr), $state:expr$(,)?) => {{
             assert_eq!($list.delete($test), Some($test));
             assert_eq!(
-                (unsafe { $list.iter() })
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
+                $list.iter().map(ToString::to_string).collect::<Vec<_>>(),
                 $state
             );
         }};
         ($list:expr, None($test:expr), $state:expr$(,)?) => {{
             assert_eq!($list.delete($test), None);
             assert_eq!(
-                (unsafe { $list.iter() })
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
+                $list.iter().map(ToString::to_string).collect::<Vec<_>>(),
                 $state
             );
         }};
@@ -414,9 +421,7 @@ mod tests {
 
         let _ = list.insert_at_idx("NUMA", 1);
         assert_eq!(
-            (unsafe { list.iter() })
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
+            list.iter().map(ToString::to_string).collect::<Vec<_>>(),
             ["Something", "NUMA", "else"]
         );
     }
@@ -449,9 +454,6 @@ mod tests {
 
         search_test!(list, None("nothing"));
     }
-
-    // TODO: find out why the below tests don't seem to run at all (not even a
-    // logic error.)
 
     #[test]
     fn deletion_found() {
