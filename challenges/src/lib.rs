@@ -1,8 +1,11 @@
-#![expect(dead_code, reason = "WIP.")]
-
-use std::{borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, rc::Rc};
+use std::{
+    borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
+};
 
 use thiserror::Error;
+
+// TODO: remove the trait bounds used only for the purposes of debugging once
+// it's done.
 
 type Inner<T> = RefCell<Node<T>>;
 
@@ -19,6 +22,8 @@ pub enum InsertionError {
         wrong_index: usize,
         actual_elements: usize,
     },
+    #[error("list is empty; elements can only be added to the list by index if it's non-empty")]
+    EmptyList,
 }
 
 impl<T: PartialEq + Default> DoublyLinkedList<T> {
@@ -33,7 +38,7 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
         }
     }
 
-    fn init_empty(&mut self, new: Node<T>) {
+    fn init_single_elem(&mut self, new: Node<T>) {
         let new = Rc::new(RefCell::new(new));
 
         self.end = Some(Rc::clone(&new));
@@ -42,72 +47,60 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
 
     pub fn insert_at(&mut self, other: T, pos: InsertionPos)
     where
-        T: Debug,
+        T: Debug + Clone,
     {
         let new = Node {
             left: None,
             right: None,
             inner: other,
         };
-
-        // TODO: finish fixing up insertion op as the tests for start and end
-        // insertion don't seem to work.
-
-        eprintln!("state of the list: {:?}", self.iter().collect::<Vec<_>>());
-
         match pos {
             InsertionPos::Start => {
                 let (Some(start), Some(end)) = (&self.start, &mut self.end) else {
-                    return self.init_empty(new);
+                    return self.init_single_elem(new);
                 };
                 let mut old = start.replace(new);
-
                 old.left = Some(Rc::clone(start));
-                old.right.clone_from(&RefCell::borrow(start).right);
-
                 let old = Rc::new(RefCell::new(old));
-
                 if Rc::ptr_eq(start, end) {
                     *end = old;
                     start.borrow_mut().right = Some(Rc::clone(end));
                 } else {
-                    start
-                        .borrow_mut()
-                        .right
-                        .as_ref()
-                        .expect(
-                            "if `start` is not equivalent to `end` then surely there's something \
-                            to the right of `start`",
+                    // SAFETY: if `start != end`, then the right of `old` ought
+                    // be pointing to a non-`None` as it is the older `start`
+                    // and the pointers are to the `RefCell`s and not to the
+                    // actual `Node`s so the above check is the same as
+                    // `old != end`.
+                    unsafe {
+                        RefCell::borrow_mut(
+                            RefCell::borrow(&old).right.as_ref().unwrap_unchecked(),
                         )
-                        .borrow_mut()
                         .left = Some(Rc::clone(&old));
+                    }
                     start.borrow_mut().right = Some(old);
                 }
             }
             InsertionPos::End => {
                 let (Some(start), Some(end)) = (&mut self.start, &self.end) else {
-                    return self.init_empty(new);
+                    return self.init_single_elem(new);
                 };
                 let mut old = end.replace(new);
-
                 old.right = Some(Rc::clone(end));
-                old.left.clone_from(&RefCell::borrow(end).left);
-
                 let old = Rc::new(RefCell::new(old));
-
                 if Rc::ptr_eq(start, end) {
                     *start = old;
                     end.borrow_mut().left = Some(Rc::clone(start));
                 } else {
-                    end.borrow_mut()
-                        .left
-                        .as_ref()
-                        .expect(
-                            "if `end` is not equivalent to `start` then surely there's something \
-                            to the left of `end`",
+                    // SAFETY: if `start != end`, then the left of `old` ought
+                    // be pointing to a non-`None` as it is the older `end` and
+                    // the pointers are to the `RefCell`s and not to the actual
+                    // `Node`s so the above check is the same as `start != old`.
+                    unsafe {
+                        RefCell::borrow_mut(
+                            RefCell::borrow(&old).left.as_ref().unwrap_unchecked(),
                         )
-                        .borrow_mut()
                         .right = Some(Rc::clone(&old));
+                    }
                     end.borrow_mut().left = Some(old);
                 }
             }
@@ -115,32 +108,44 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
     }
 
     pub fn insert_at_idx(&mut self, other: T, idx: usize) -> Result<(), InsertionError> {
+        self.start.as_ref().ok_or(InsertionError::EmptyList)?;
         let new = Node {
             left: None,
             right: None,
             inner: other,
         };
-        let Some(elem) = self.ptr_iter().nth(idx) else {
+        let (ControlFlow::Break((len, elem)) | ControlFlow::Continue((len, elem))) = self
+            .ptr_iter()
+            .enumerate()
+            .try_fold(None, |_, (inner_idx, ptr)| {
+                if inner_idx == idx {
+                    ControlFlow::Break(Some((None, ptr)))
+                } else {
+                    ControlFlow::Continue(Some((Some(inner_idx + 1), ptr)))
+                }
+            })
+            // SAFETY: `result` can never be `None` because the list is checked
+            // for emptyness at the start of the method.
+            .map_continue(|result| unsafe { result.unwrap_unchecked() })
+            .map_break(|result| unsafe { result.unwrap_unchecked() });
+        if let Some(len) = len {
             return Err(InsertionError::IndexOutOfBounds {
                 wrong_index: idx,
-                actual_elements: self.iter().count(),
+                actual_elements: len,
             });
-        };
+        }
         let Some(end) = &mut self.end else {
-            self.init_empty(new);
+            self.init_single_elem(new);
             return Ok(());
         };
         let mut old = elem.replace(new);
-
         old.left = Some(Rc::clone(&elem));
         old.right.clone_from(&RefCell::borrow(&elem).right);
-
         if let Some(ref right) = RefCell::borrow(&elem).right {
             right.borrow_mut().left = Some(Rc::new(RefCell::new(old)));
         } else {
             elem.borrow_mut().right = Some(Rc::new(RefCell::new(old)));
         }
-
         if Rc::ptr_eq(&elem, end) {
             *end = Rc::clone(RefCell::borrow(&elem).right.as_ref().unwrap());
         }
@@ -235,7 +240,6 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
     pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             first: self.start.as_ref().map(|elem| elem.as_ptr().cast_const()),
-            last: self.end.as_ref().map(|elem| elem.as_ptr().cast_const()),
             current: None,
             _marker: PhantomData,
         }
@@ -243,11 +247,9 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
 
     fn ptr_iter(&self) -> PtrIter<T> {
         PtrIter {
-            // The below use a method-type clone instead of an associated
-            // function approach because start and end are wrapped in `Option`s.
+            // The below use a clone with method syntax instead of fully
+            // qualified syntax because start and end are wrapped in `Option`s.
             start: self.start.clone(),
-            end: self.end.clone(),
-            current: 0,
             current_indexer: None,
         }
     }
@@ -268,7 +270,9 @@ impl<T: PartialEq + Default> Default for DoublyLinkedList<T> {
     }
 }
 
-impl<T: IntoIterator<Item: PartialEq + Default + Debug>> From<T> for DoublyLinkedList<T::Item> {
+impl<T: IntoIterator<Item: PartialEq + Default + Debug + Clone>> From<T>
+    for DoublyLinkedList<T::Item>
+{
     fn from(value: T) -> Self {
         value.into_iter().fold(Self::default(), |mut accum, elem| {
             accum.insert_at(elem, InsertionPos::End);
@@ -300,7 +304,6 @@ impl<T: PartialEq> PartialEq for Node<T> {
 #[derive(Debug)]
 pub struct Iter<'a, T: 'a> {
     first: Option<*const Node<T>>,
-    last: Option<*const Node<T>>,
     current: Option<*const Node<T>>,
     _marker: PhantomData<&'a T>,
 }
@@ -326,8 +329,6 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
 struct PtrIter<T> {
     start: Option<Rc<RefCell<Node<T>>>>,
-    end: Option<Rc<RefCell<Node<T>>>>,
-    current: usize,
     current_indexer: Option<Rc<RefCell<Node<T>>>>,
 }
 
@@ -394,7 +395,6 @@ mod tests {
     #[test]
     fn insertion_at_start() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
-
         insertion_test!(
             list,
             "Something else",
@@ -406,7 +406,6 @@ mod tests {
     #[test]
     fn insertion_at_end() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
-
         insertion_test!(
             list,
             "Nothing",
@@ -416,9 +415,17 @@ mod tests {
     }
 
     #[test]
+    fn insertion_at_idx_empty_list() {
+        let mut list = DoublyLinkedList::default();
+        assert!(
+            list.insert_at_idx("Something", 0)
+                .is_err_and(|err| { matches!(err, InsertionError::EmptyList) })
+        );
+    }
+
+    #[test]
     fn insertion_at_idx_correct() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
-
         let _ = list.insert_at_idx("NUMA", 1);
         assert_eq!(
             list.iter().map(ToString::to_string).collect::<Vec<_>>(),
@@ -429,7 +436,6 @@ mod tests {
     #[test]
     fn insertion_at_idx_incorrect() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
-
         assert!(list.insert_at_idx("NUMA", 10).is_err_and(|err| {
             matches!(
                 err,
@@ -444,28 +450,24 @@ mod tests {
     #[test]
     fn search_found() {
         let list = DoublyLinkedList::from(["Something", "else"]);
-
         search_test!(list, Some("else"));
     }
 
     #[test]
     fn search_not_found() {
         let list = DoublyLinkedList::from(["Something", "else"]);
-
         search_test!(list, None("nothing"));
     }
 
     #[test]
     fn deletion_found() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
-
         deletion_test!(list, Some("Something"), ["else"]);
     }
 
     #[test]
     fn deletion_not_found() {
         let mut list = DoublyLinkedList::from(["Something", "else"]);
-
         deletion_test!(list, None("other"), ["Something", "else"]);
     }
 }
