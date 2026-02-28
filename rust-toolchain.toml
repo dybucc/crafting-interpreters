@@ -1,12 +1,13 @@
 [toolchain]
-channel = "nightly"
+channel = "nightly-2026-02-26"
 profile = "minimal"
 components = [
-    "rustc",
-    "cargo",
-    "rust-analyzer",
-    "rustfmt",
-    "rust-std",
-    "clippy",
-    "rust-src",
+  "rustc",
+  "cargo",
+  "rust-analyzer",
+  "rustfmt",
+  "rust-std",
+  "clippy",
+  "rust-src",
+  "miri",
 ]

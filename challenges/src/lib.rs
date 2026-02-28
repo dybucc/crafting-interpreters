@@ -4,8 +4,7 @@ use std::{
 
 use thiserror::Error;
 
-// TODO: remove the trait bounds used only for the purposes of debugging once
-// it's done.
+// TODO: finish implementing `Drop` on the list.
 
 type Inner<T> = RefCell<Node<T>>;
 
@@ -26,7 +25,17 @@ pub enum InsertionError {
     EmptyList,
 }
 
-impl<T: PartialEq + Default> DoublyLinkedList<T> {
+#[macro_export]
+macro_rules! insert_at {
+    ($self:expr, $other:expr) => {{
+        $self.insert_at($other, InsertionPos::Start);
+    }};
+    ($self:expr, $other:expr, $pos:expr) => {{
+        $self.insert_at($other, $pos);
+    }};
+}
+
+impl<T: PartialEq> DoublyLinkedList<T> {
     #[expect(
         clippy::must_use_candidate,
         reason = "It's not a bug for a list to be discarded."
@@ -45,10 +54,7 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
         self.start = Some(new);
     }
 
-    pub fn insert_at(&mut self, other: T, pos: InsertionPos)
-    where
-        T: Debug + Clone,
-    {
+    pub fn insert_at(&mut self, other: T, pos: InsertionPos) {
         let new = Node {
             left: None,
             right: None,
@@ -165,12 +171,12 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
         T: Borrow<Q>,
     {
         self.ptr_iter()
-            .find(|elem| RefCell::borrow(elem).inner.borrow().eq(other))
+            .find(|elem| RefCell::borrow(elem).inner.borrow() == other)
     }
 
     pub fn delete<Q: PartialEq + ?Sized>(&mut self, other: &Q) -> Option<T>
     where
-        T: Borrow<Q> + Debug,
+        T: Borrow<Q>,
     {
         #![expect(clippy::unit_arg, reason = "I want C++ style.")]
 
@@ -247,15 +253,24 @@ impl<T: PartialEq + Default> DoublyLinkedList<T> {
 
     fn ptr_iter(&self) -> PtrIter<T> {
         PtrIter {
-            // The below use a clone with method syntax instead of fully
-            // qualified syntax because start and end are wrapped in `Option`s.
+            // We use a clone with method syntax instead of fully qualified
+            // syntax because `start` is wrapped in an `Option`.
             start: self.start.clone(),
             current_indexer: None,
         }
     }
 }
 
-impl<'a, T: PartialEq + Default> IntoIterator for &'a DoublyLinkedList<T> {
+impl<T> Drop for DoublyLinkedList<T> {
+    fn drop(&mut self) {
+        let Some(current) = &self.start else {
+            return;
+        };
+        while let Some(right) = &RefCell::borrow(current).right {}
+    }
+}
+
+impl<'a, T: PartialEq> IntoIterator for &'a DoublyLinkedList<T> {
     type Item = <Iter<'a, T> as Iterator>::Item;
     type IntoIter = Iter<'a, T>;
 
@@ -264,15 +279,13 @@ impl<'a, T: PartialEq + Default> IntoIterator for &'a DoublyLinkedList<T> {
     }
 }
 
-impl<T: PartialEq + Default> Default for DoublyLinkedList<T> {
+impl<T: PartialEq> Default for DoublyLinkedList<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: IntoIterator<Item: PartialEq + Default + Debug + Clone>> From<T>
-    for DoublyLinkedList<T::Item>
-{
+impl<T: IntoIterator<Item: PartialEq>> From<T> for DoublyLinkedList<T::Item> {
     fn from(value: T) -> Self {
         value.into_iter().fold(Self::default(), |mut accum, elem| {
             accum.insert_at(elem, InsertionPos::End);
@@ -300,6 +313,8 @@ impl<T: PartialEq> PartialEq for Node<T> {
         self.inner == other.inner
     }
 }
+
+impl<T: PartialEq> Eq for Node<T> {}
 
 #[derive(Debug)]
 pub struct Iter<'a, T: 'a> {
@@ -371,8 +386,8 @@ mod tests {
     }
 
     macro_rules! search_test {
-        ($list:expr, Some($test:expr) $(,)?) => {{ assert_eq!($list.find($test), Some(&$test)) }};
-        ($list:expr, None($test:expr) $(,)?) => {{ assert_eq!($list.find($test), None) }};
+        ($list:expr, Some($test:expr)$(,)?) => {{ assert_eq!($list.find($test), Some(&$test)) }};
+        ($list:expr, None($test:expr)$(,)?) => {{ assert_eq!($list.find($test), None) }};
     }
 
     macro_rules! deletion_test {
