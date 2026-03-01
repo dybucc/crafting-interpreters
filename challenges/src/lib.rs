@@ -4,8 +4,6 @@ use std::{
 
 use thiserror::Error;
 
-// TODO: finish implementing `Drop` on the list.
-
 type Inner<T> = RefCell<Node<T>>;
 
 #[derive(Debug)]
@@ -35,7 +33,7 @@ macro_rules! insert_at {
     }};
 }
 
-impl<T: PartialEq> DoublyLinkedList<T> {
+impl<T> DoublyLinkedList<T> {
     #[expect(
         clippy::must_use_candidate,
         reason = "It's not a bug for a list to be discarded."
@@ -54,11 +52,11 @@ impl<T: PartialEq> DoublyLinkedList<T> {
         self.start = Some(new);
     }
 
-    pub fn insert_at(&mut self, other: T, pos: InsertionPos) {
+    pub fn insert_at<Q: Into<T>>(&mut self, other: Q, pos: InsertionPos) {
         let new = Node {
             left: None,
             right: None,
-            inner: other,
+            inner: other.into(),
         };
         match pos {
             InsertionPos::Start => {
@@ -113,12 +111,16 @@ impl<T: PartialEq> DoublyLinkedList<T> {
         }
     }
 
-    pub fn insert_at_idx(&mut self, other: T, idx: usize) -> Result<(), InsertionError> {
+    pub fn insert_at_idx<Q: Into<T>>(
+        &mut self,
+        other: Q,
+        idx: usize,
+    ) -> Result<(), InsertionError> {
         self.start.as_ref().ok_or(InsertionError::EmptyList)?;
         let new = Node {
             left: None,
             right: None,
-            inner: other,
+            inner: other.into(),
         };
         let (ControlFlow::Break((len, elem)) | ControlFlow::Continue((len, elem))) = self
             .ptr_iter()
@@ -145,16 +147,19 @@ impl<T: PartialEq> DoublyLinkedList<T> {
             return Ok(());
         };
         let mut old = elem.replace(new);
+        RefCell::borrow_mut(&elem).left.clone_from(&old.left);
         old.left = Some(Rc::clone(&elem));
-        old.right.clone_from(&RefCell::borrow(&elem).right);
-        if let Some(ref right) = RefCell::borrow(&elem).right {
-            right.borrow_mut().left = Some(Rc::new(RefCell::new(old)));
-        } else {
-            elem.borrow_mut().right = Some(Rc::new(RefCell::new(old)));
+        let old = Rc::new(RefCell::new(old));
+        if let Some(left) = &RefCell::borrow(&elem).left {
+            RefCell::borrow_mut(left).right = Some(Rc::clone(&elem));
         }
-        if Rc::ptr_eq(&elem, end) {
-            *end = Rc::clone(RefCell::borrow(&elem).right.as_ref().unwrap());
+        if let Some(right) = &RefCell::borrow(&old).right {
+            RefCell::borrow_mut(right).left = Some(Rc::clone(&old));
         }
+        if Rc::ptr_eq(end, &elem) {
+            *end = Rc::clone(&old);
+        }
+        RefCell::borrow_mut(&elem).right = Some(old);
 
         Ok(())
     }
@@ -251,6 +256,14 @@ impl<T: PartialEq> DoublyLinkedList<T> {
         }
     }
 
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut {
+            first: self.start.as_ref().map(|elem| elem.as_ptr()),
+            current: None,
+            _marker: PhantomData,
+        }
+    }
+
     fn ptr_iter(&self) -> PtrIter<T> {
         PtrIter {
             // We use a clone with method syntax instead of fully qualified
@@ -263,14 +276,22 @@ impl<T: PartialEq> DoublyLinkedList<T> {
 
 impl<T> Drop for DoublyLinkedList<T> {
     fn drop(&mut self) {
-        let Some(current) = &self.start else {
+        let Some(current) = &mut self.start else {
             return;
         };
-        while let Some(right) = &RefCell::borrow(current).right {}
+        let mut ptrs = Vec::new();
+        while let Some(right) = &RefCell::borrow(&Rc::clone(current)).right {
+            right.borrow_mut().left = None;
+            ptrs.push(Rc::clone(current));
+            *current = Rc::clone(right);
+        }
+        self.start = None;
+        self.end = None;
+        drop(ptrs);
     }
 }
 
-impl<'a, T: PartialEq> IntoIterator for &'a DoublyLinkedList<T> {
+impl<'a, T: 'a> IntoIterator for &'a DoublyLinkedList<T> {
     type Item = <Iter<'a, T> as Iterator>::Item;
     type IntoIter = Iter<'a, T>;
 
@@ -279,13 +300,22 @@ impl<'a, T: PartialEq> IntoIterator for &'a DoublyLinkedList<T> {
     }
 }
 
-impl<T: PartialEq> Default for DoublyLinkedList<T> {
+impl<'a, T: 'a> IntoIterator for &'a mut DoublyLinkedList<T> {
+    type Item = <IterMut<'a, T> as Iterator>::Item;
+    type IntoIter = IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+impl<T> Default for DoublyLinkedList<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: IntoIterator<Item: PartialEq>> From<T> for DoublyLinkedList<T::Item> {
+impl<T: IntoIterator> From<T> for DoublyLinkedList<T::Item> {
     fn from(value: T) -> Self {
         value.into_iter().fold(Self::default(), |mut accum, elem| {
             accum.insert_at(elem, InsertionPos::End);
@@ -295,26 +325,24 @@ impl<T: IntoIterator<Item: PartialEq>> From<T> for DoublyLinkedList<T::Item> {
     }
 }
 
-#[derive(Clone, Copy)]
+impl<T> FromIterator<T> for DoublyLinkedList<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        iter.into()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum InsertionPos {
     Start,
     End,
 }
 
 #[derive(Debug)]
-pub struct Node<T> {
-    left: Option<Rc<RefCell<Node<T>>>>,
-    right: Option<Rc<RefCell<Node<T>>>>,
+struct Node<T> {
+    left: Option<Rc<Inner<T>>>,
+    right: Option<Rc<Inner<T>>>,
     inner: T,
 }
-
-impl<T: PartialEq> PartialEq for Node<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-
-impl<T: PartialEq> Eq for Node<T> {}
 
 #[derive(Debug)]
 pub struct Iter<'a, T: 'a> {
@@ -323,7 +351,7 @@ pub struct Iter<'a, T: 'a> {
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T> Iterator for Iter<'a, T> {
+impl<'a, T: 'a> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -342,9 +370,37 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
+#[derive(Debug)]
+pub struct IterMut<'a, T: 'a> {
+    first: Option<*mut Node<T>>,
+    current: Option<*mut Node<T>>,
+    _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T: 'a> Iterator for IterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.current {
+            None => self.current.clone_from(&self.first),
+            Some(current) => {
+                let Some(right) = (unsafe { &(*current).right }) else {
+                    return None;
+                };
+                self.current = Some(right.as_ptr());
+            }
+        }
+
+        self.current
+            .as_ref()
+            .map(|ptr| unsafe { &mut (**ptr).inner })
+    }
+}
+
+#[derive(Debug)]
 struct PtrIter<T> {
-    start: Option<Rc<RefCell<Node<T>>>>,
-    current_indexer: Option<Rc<RefCell<Node<T>>>>,
+    start: Option<Rc<Inner<T>>>,
+    current_indexer: Option<Rc<Inner<T>>>,
 }
 
 impl<T> Iterator for PtrIter<T> {
@@ -431,7 +487,7 @@ mod tests {
 
     #[test]
     fn insertion_at_idx_empty_list() {
-        let mut list = DoublyLinkedList::default();
+        let mut list: DoublyLinkedList<&str> = DoublyLinkedList::default();
         assert!(
             list.insert_at_idx("Something", 0)
                 .is_err_and(|err| { matches!(err, InsertionError::EmptyList) })
