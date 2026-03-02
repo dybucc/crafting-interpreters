@@ -1,5 +1,5 @@
 use std::{
-    borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
+    borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, mem, ops::ControlFlow, rc::Rc,
 };
 
 use thiserror::Error;
@@ -244,6 +244,20 @@ impl<T> DoublyLinkedList<T> {
         Some(target.into_inner().inner)
     }
 
+    pub fn into_iter(mut self) -> IntoIter<T> {
+        let first = self.start.as_ref().map(Rc::clone);
+        let last = self.end.as_ref().map(Rc::clone);
+        self = Self::new();
+        mem::forget(self);
+
+        IntoIter {
+            first,
+            last,
+            current: None,
+            current_ptr: None,
+        }
+    }
+
     #[expect(
         clippy::must_use_candidate,
         reason = "It's not a bug not to use the result of this method."
@@ -342,6 +356,35 @@ struct Node<T> {
     left: Option<Rc<Inner<T>>>,
     right: Option<Rc<Inner<T>>>,
     inner: T,
+}
+
+pub struct IntoIter<T> {
+    first: Option<Rc<Inner<T>>>,
+    last: Option<Rc<Inner<T>>>,
+    current: Option<*const Inner<T>>,
+    current_ptr: Option<Rc<Inner<T>>>,
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.current, self.current_ptr.as_mut()) {
+            (None, None) => {
+                self.current_ptr = Some(Rc::clone(self.first.as_ref()?));
+                self.current = Some(Rc::as_ptr(self.first.as_ref()?));
+                self.first = None;
+            }
+            (Some(ref mut current), Some(current_ptr)) => {
+                let next = if let Some(right) = current_ptr.as_ptr().right {};
+                self.current_ptr = None;
+            }
+            _ => (), // Can't happen.
+        }
+
+        self.current
+            .map(|ptr| unsafe { ptr.read() }.into_inner().inner)
+    }
 }
 
 #[derive(Debug)]
