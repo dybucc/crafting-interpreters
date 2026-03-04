@@ -1,5 +1,5 @@
 use std::{
-    borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, mem, ops::ControlFlow, rc::Rc,
+    borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
 };
 
 use thiserror::Error;
@@ -247,14 +247,13 @@ impl<T> DoublyLinkedList<T> {
     pub fn into_iter(mut self) -> IntoIter<T> {
         let first = self.start.as_ref().map(Rc::clone);
         let last = self.end.as_ref().map(Rc::clone);
-        self = Self::new();
-        mem::forget(self);
+        self.start = None;
+        self.end = None;
 
         IntoIter {
             first,
             last,
-            current: None,
-            current_ptr: None,
+            next_ptr: None,
         }
     }
 
@@ -361,29 +360,62 @@ struct Node<T> {
 pub struct IntoIter<T> {
     first: Option<Rc<Inner<T>>>,
     last: Option<Rc<Inner<T>>>,
-    current: Option<*const Inner<T>>,
-    current_ptr: Option<Rc<Inner<T>>>,
+    next_ptr: Option<Rc<Inner<T>>>,
 }
 
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match (self.current, self.current_ptr.as_mut()) {
-            (None, None) => {
-                self.current_ptr = Some(Rc::clone(self.first.as_ref()?));
-                self.current = Some(Rc::as_ptr(self.first.as_ref()?));
-                self.first = None;
-            }
-            (Some(ref mut current), Some(current_ptr)) => {
-                let next = if let Some(right) = current_ptr.as_ptr().right {};
-                self.current_ptr = None;
-            }
-            _ => (), // Can't happen.
-        }
+        'a: {
+            match self.next_ptr.as_mut() {
+                None => {
+                    let first = self.first.as_ref()?.clone();
+                    self.next_ptr.clone_from(&RefCell::borrow(&first).right);
+                    if let Some(right) = self.next_ptr.as_ref() {
+                        RefCell::borrow_mut(right).left = None;
+                    }
+                    self.first = None;
 
-        self.current
-            .map(|ptr| unsafe { ptr.read() }.into_inner().inner)
+                    Some(
+                        Rc::into_inner(first)
+                            .expect("the first element of the list should be isolated here"),
+                    )
+                }
+                // It's worth it not to keep an exclusive reference to the
+                // option's generic parameter so that we can mutate both the
+                // underlying value with `unwrap()` and the whole option through
+                // field projection.
+                mut next_option @ Some(_) => {
+                    let current_ptr = (*next_option.as_ref().unwrap()).clone();
+                    if Rc::ptr_eq(
+                        &current_ptr,
+                        self.last.as_ref().expect(
+                            "if we've reached the point where there was a viable next pointer, \
+                            then surely there's an end item in the list",
+                        ),
+                    ) {
+                        self.next_ptr = None;
+                        break 'a Some(
+                            Rc::into_inner(current_ptr)
+                                .expect("the current element in the list should be isolated"),
+                        );
+                    }
+                    let next = RefCell::borrow(&current_ptr).right.clone().expect(
+                        "if `current_ptr` does not point to the same allocation as `self.last`, \
+                        then surely there's some list item to its left",
+                    );
+                    RefCell::borrow_mut(&next).left = None;
+                    **next_option.as_mut().unwrap() = next;
+
+                    Some(
+                        Rc::into_inner(current_ptr)
+                            .expect("the current element in the list should be isolated"),
+                    )
+                }
+            }
+        }
+        .map(|current| current.into_inner().inner)
     }
 }
 
