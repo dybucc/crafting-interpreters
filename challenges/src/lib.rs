@@ -1,5 +1,11 @@
+#![feature(const_destruct)]
+
 use std::{
-    borrow::Borrow, cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
+    borrow::Borrow,
+    cell::RefCell,
+    marker::{Destruct, PhantomData},
+    ops::ControlFlow,
+    rc::Rc,
 };
 
 use thiserror::Error;
@@ -10,11 +16,12 @@ type Inner<T> = RefCell<Node<T>>;
 pub struct DoublyLinkedList<T> {
     start: Option<Rc<Inner<T>>>,
     end: Option<Rc<Inner<T>>>,
+    len: usize,
 }
 
 #[derive(Error, Debug)]
 pub enum InsertionError {
-    #[error("passed index {} out of bounds; only {} available", .wrong_index, .actual_elements)]
+    #[error("passed index {wrong_index} out of bounds; only {actual_elements} elements available")]
     IndexOutOfBounds {
         wrong_index: usize,
         actual_elements: usize,
@@ -26,7 +33,7 @@ pub enum InsertionError {
 #[macro_export]
 macro_rules! insert_at {
     ($self:expr, $other:expr) => {{
-        $self.insert_at($other, InsertionPos::Start);
+        $self.insert_at($other, InsertionPos::End);
     }};
     ($self:expr, $other:expr, $pos:expr) => {{
         $self.insert_at($other, $pos);
@@ -42,7 +49,24 @@ impl<T> DoublyLinkedList<T> {
         Self {
             start: None,
             end: None,
+            len: 0,
         }
+    }
+
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "It's not a bug not to use the result fo this function."
+    )]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "It's not a bug not to use the result fo this function."
+    )]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     fn init_single_elem(&mut self, new: Node<T>) {
@@ -50,6 +74,7 @@ impl<T> DoublyLinkedList<T> {
 
         self.end = Some(Rc::clone(&new));
         self.start = Some(new);
+        self.len = 1;
     }
 
     pub fn insert_at<Q: Into<T>>(&mut self, other: Q, pos: InsertionPos) {
@@ -109,6 +134,7 @@ impl<T> DoublyLinkedList<T> {
                 }
             }
         }
+        self.len += 1;
     }
 
     pub fn insert_at_idx<Q: Into<T>>(
@@ -160,6 +186,7 @@ impl<T> DoublyLinkedList<T> {
             *end = Rc::clone(&old);
         }
         RefCell::borrow_mut(&elem).right = Some(old);
+        self.len += 1;
 
         Ok(())
     }
@@ -183,7 +210,7 @@ impl<T> DoublyLinkedList<T> {
     where
         T: Borrow<Q>,
     {
-        #![expect(clippy::unit_arg, reason = "I want C++ style.")]
+        #![expect(clippy::unit_arg, reason = "Beauty comes at a cost.")]
 
         fn rearrange_start<T>(start: &mut Rc<Inner<T>>) -> Option<()> {
             let right = if let Some(right) = &RefCell::borrow(start).right {
@@ -194,6 +221,7 @@ impl<T> DoublyLinkedList<T> {
 
             Some(*start = right)
         }
+
         fn rearrange_end<T>(end: &mut Rc<Inner<T>>) -> Option<()> {
             let left = if let Some(left) = &RefCell::borrow(end).left {
                 Rc::clone(left)
@@ -203,11 +231,13 @@ impl<T> DoublyLinkedList<T> {
 
             Some(*end = left)
         }
+
         fn rearrange_left<T>(left: &Rc<Inner<T>>, target: &Inner<T>) {
             RefCell::borrow_mut(left)
                 .right
                 .clone_from(&RefCell::borrow(target).right);
         }
+
         fn rearrange_right<T>(right: &Rc<Inner<T>>, target: &Inner<T>) {
             RefCell::borrow_mut(right)
                 .left
@@ -218,7 +248,6 @@ impl<T> DoublyLinkedList<T> {
         let (Some(start), Some(end)) = (&mut self.start, &mut self.end) else {
             return None;
         };
-
         if Rc::ptr_eq(start, &target)
             && let None = rearrange_start(start)
         {
@@ -229,32 +258,16 @@ impl<T> DoublyLinkedList<T> {
         {
             self.end = None;
         }
-
         if let Some(left) = &RefCell::borrow(&target).left {
             rearrange_left(left, &target);
         }
         if let Some(right) = &RefCell::borrow(&target).right {
             rearrange_right(right, &target);
         }
-
-        let Some(target) = Rc::into_inner(target) else {
-            panic!("`target` should only have a single reference at this point");
-        };
+        let target = Rc::into_inner(target).expect("`target` should be isolated at this point");
+        self.len -= 1;
 
         Some(target.into_inner().inner)
-    }
-
-    pub fn into_iter(mut self) -> IntoIter<T> {
-        let first = self.start.as_ref().map(Rc::clone);
-        let last = self.end.as_ref().map(Rc::clone);
-        self.start = None;
-        self.end = None;
-
-        IntoIter {
-            first,
-            last,
-            next_ptr: None,
-        }
     }
 
     #[expect(
@@ -279,11 +292,35 @@ impl<T> DoublyLinkedList<T> {
 
     fn ptr_iter(&self) -> PtrIter<T> {
         PtrIter {
-            // We use a clone with method syntax instead of fully qualified
-            // syntax because `start` is wrapped in an `Option`.
-            start: self.start.clone(),
-            current_indexer: None,
+            first: self.start.clone(),
+            current: None,
         }
+    }
+}
+
+// TODO: get either the `Clone` impl to perform a shallow copy with
+// `clone_from()`, or othewise add an inherent impl method that allows cloning
+// without requiring `T: Clone`. Implement only the inherent method, and call it
+// from the below impl.
+
+/// Clones values by either one of a deep or shallow copy.
+impl<T: Clone> Clone for DoublyLinkedList<T> {
+    /// Clones the entire list into a new list, performing new allocations for
+    /// all elements.
+    fn clone(&self) -> Self {
+        self.iter()
+            .map(Clone::clone)
+            .fold(Self::default(), |mut list, elem| {
+                insert_at!(list, elem);
+
+                list
+            })
+    }
+
+    fn clone_from(&mut self, source: &Self)
+    where
+        Self: Destruct,
+    {
     }
 }
 
@@ -301,6 +338,24 @@ impl<T> Drop for DoublyLinkedList<T> {
         self.start = None;
         self.end = None;
         drop(ptrs);
+    }
+}
+
+impl<T> IntoIterator for DoublyLinkedList<T> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(mut self) -> Self::IntoIter {
+        let first = self.start.as_ref().map(Rc::clone);
+        let last = self.end.as_ref().map(Rc::clone);
+        self.start = None;
+        self.end = None;
+
+        IntoIter {
+            first,
+            last,
+            next_ptr: None,
+        }
     }
 }
 
@@ -328,19 +383,13 @@ impl<T> Default for DoublyLinkedList<T> {
     }
 }
 
-impl<T: IntoIterator> From<T> for DoublyLinkedList<T::Item> {
-    fn from(value: T) -> Self {
-        value.into_iter().fold(Self::default(), |mut accum, elem| {
+impl<T> FromIterator<T> for DoublyLinkedList<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        iter.into_iter().fold(Self::default(), |mut accum, elem| {
             accum.insert_at(elem, InsertionPos::End);
 
             accum
         })
-    }
-}
-
-impl<T> FromIterator<T> for DoublyLinkedList<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        iter.into()
     }
 }
 
@@ -370,10 +419,10 @@ impl<T> Iterator for IntoIter<T> {
         'a: {
             match self.next_ptr.as_mut() {
                 None => {
-                    let first = self.first.as_ref()?.clone();
-                    self.next_ptr.clone_from(&RefCell::borrow(&first).right);
-                    if let Some(right) = self.next_ptr.as_ref() {
+                    let first = Rc::clone(self.first.as_ref()?);
+                    if let Some(right) = &RefCell::borrow(&first).right {
                         RefCell::borrow_mut(right).left = None;
+                        self.next_ptr = Some(Rc::clone(right));
                     }
                     self.first = None;
 
@@ -382,12 +431,12 @@ impl<T> Iterator for IntoIter<T> {
                             .expect("the first element of the list should be isolated here"),
                     )
                 }
-                // It's worth it not to keep an exclusive reference to the
+                // It's worth it *not* to keep an exclusive reference to the
                 // option's generic parameter so that we can mutate both the
                 // underlying value with `unwrap()` and the whole option through
-                // field projection.
+                // field projection on `self`.
                 mut next_option @ Some(_) => {
-                    let current_ptr = (*next_option.as_ref().unwrap()).clone();
+                    let current_ptr = Rc::clone(next_option.as_ref().unwrap());
                     if Rc::ptr_eq(
                         &current_ptr,
                         self.last.as_ref().expect(
@@ -396,6 +445,7 @@ impl<T> Iterator for IntoIter<T> {
                         ),
                     ) {
                         self.next_ptr = None;
+                        self.last = None;
                         break 'a Some(
                             Rc::into_inner(current_ptr)
                                 .expect("the current element in the list should be isolated"),
@@ -432,8 +482,14 @@ impl<'a, T: 'a> Iterator for Iter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.current {
             None => self.current = Some(self.first?),
-            Some(item) => {
-                let Some(next) = &(unsafe { &*item }).right else {
+            Some(current) => {
+                // SAFETY: the pointer is never null because it's gated behind
+                // an `Option` and that `Option` is only ever `Some(_)` when
+                // there's at least one element in the list (see the above
+                // `None` branch.) State beyond this relies on there being a
+                // pointer to the right of the current one, for which the
+                // let-else here ensures is sound.
+                let Some(next) = (unsafe { &(*current).right }) else {
                     return None;
                 };
 
@@ -459,6 +515,12 @@ impl<'a, T: 'a> Iterator for IterMut<'a, T> {
         match self.current {
             None => self.current.clone_from(&self.first),
             Some(current) => {
+                // SAFETY: the pointer is never null because it's gated behind
+                // an `Option` and that `Option` is only ever `Some(_)` when
+                // there's at least one element in the list (see the above
+                // `None` branch.) State beyond this relies on there being a
+                // pointer to the right of the current one, for which the
+                // let-else here ensures is sound.
                 let Some(right) = (unsafe { &(*current).right }) else {
                     return None;
                 };
@@ -466,43 +528,44 @@ impl<'a, T: 'a> Iterator for IterMut<'a, T> {
             }
         }
 
-        self.current
-            .as_ref()
-            .map(|ptr| unsafe { &mut (**ptr).inner })
+        // SAFETY: if execution flow has reached this point, then the pointer
+        // can only ever be wrapped `Some` for the reasons mentioned in the
+        // above SAFETY comment.
+        self.current.map(|ptr| unsafe { &mut (*ptr).inner })
     }
 }
 
 #[derive(Debug)]
 struct PtrIter<T> {
-    start: Option<Rc<Inner<T>>>,
-    current_indexer: Option<Rc<Inner<T>>>,
+    first: Option<Rc<Inner<T>>>,
+    current: Option<Rc<Inner<T>>>,
 }
 
 impl<T> Iterator for PtrIter<T> {
     type Item = Rc<RefCell<Node<T>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(start) = &self.start else {
+        let Some(start) = &self.first else {
             return None;
         };
 
-        match self.current_indexer {
-            None => self.current_indexer = Some(Rc::clone(start)),
+        match self.current {
+            None => self.current = Some(Rc::clone(start)),
             Some(ref mut indexer)
                 if let Some(ref right) = RefCell::borrow(&Rc::clone(indexer)).right =>
             {
                 *indexer = Rc::clone(right);
             }
-            _ => self.current_indexer = None,
+            _ => self.current = None,
         }
 
-        self.current_indexer.as_ref().map(Rc::clone)
+        self.current.as_ref().map(Rc::clone)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::string::ToString;
+    use std::{assert_matches, string::ToString};
 
     use super::*;
 
@@ -540,7 +603,7 @@ mod tests {
 
     #[test]
     fn insertion_at_start() {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
+        let mut list = DoublyLinkedList::from_iter(["Something", "else"]);
         insertion_test!(
             list,
             "Something else",
@@ -551,7 +614,7 @@ mod tests {
 
     #[test]
     fn insertion_at_end() {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
+        let mut list = DoublyLinkedList::from_iter(["Something", "else"]);
         insertion_test!(
             list,
             "Nothing",
@@ -563,15 +626,15 @@ mod tests {
     #[test]
     fn insertion_at_idx_empty_list() {
         let mut list: DoublyLinkedList<&str> = DoublyLinkedList::default();
-        assert!(
-            list.insert_at_idx("Something", 0)
-                .is_err_and(|err| { matches!(err, InsertionError::EmptyList) })
+        assert_matches!(
+            list.insert_at_idx("Something", 0),
+            Err(InsertionError::EmptyList)
         );
     }
 
     #[test]
     fn insertion_at_idx_correct() {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
+        let mut list = DoublyLinkedList::from_iter(["Something", "else"]);
         let _ = list.insert_at_idx("NUMA", 1);
         assert_eq!(
             list.iter().map(ToString::to_string).collect::<Vec<_>>(),
@@ -581,39 +644,71 @@ mod tests {
 
     #[test]
     fn insertion_at_idx_incorrect() {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
-        assert!(list.insert_at_idx("NUMA", 10).is_err_and(|err| {
-            matches!(
-                err,
-                InsertionError::IndexOutOfBounds {
-                    wrong_index: 10,
-                    actual_elements: 2,
-                }
-            )
-        }));
+        let mut list = DoublyLinkedList::from_iter(["Something", "else"]);
+        assert_matches!(
+            list.insert_at_idx("NUMA", 10),
+            Err(InsertionError::IndexOutOfBounds {
+                wrong_index: 10,
+                actual_elements: 2,
+            })
+        );
     }
 
     #[test]
     fn search_found() {
-        let list = DoublyLinkedList::from(["Something", "else"]);
+        let list = DoublyLinkedList::from_iter(["Something", "else"]);
         search_test!(list, Some("else"));
     }
 
     #[test]
     fn search_not_found() {
-        let list = DoublyLinkedList::from(["Something", "else"]);
+        let list = DoublyLinkedList::from_iter(["Something", "else"]);
         search_test!(list, None("nothing"));
     }
 
     #[test]
     fn deletion_found() {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
+        let mut list = DoublyLinkedList::from_iter(["Something", "else"]);
         deletion_test!(list, Some("Something"), ["else"]);
     }
 
     #[test]
     fn deletion_not_found() {
-        let mut list = DoublyLinkedList::from(["Something", "else"]);
+        let mut list = DoublyLinkedList::from_iter(["Something", "else"]);
         deletion_test!(list, None("other"), ["Something", "else"]);
+    }
+
+    // NOTE:
+    // The below tests only check for the iterators to not be doing any funky
+    // stuff with their allocations, and so it only makes sense to run them with
+    // Miri, so as to get better diagnostics on the memory issues.
+
+    #[cfg(miri)]
+    #[test]
+    fn consuming_iter() {
+        let list = DoublyLinkedList::from_iter(["Something", "else"]);
+        assert_eq!(list.state(), []);
+        for _ in list {}
+        assert_eq!(list.state(), []);
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn shared_iter() {
+        let list = DoublyLinkedList::from_iter(["Something", "else"]);
+        assert_eq!(list.state(), []);
+        for elem in &list {
+            dbg!(elem);
+        }
+        assert_eq!(list.state(), []);
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn exclusive_iter() {
+        let mut list = DoublyLinkedList::from_iter(["Something", "else"]);
+        assert_eq!(list.state(), []);
+        for elem in &mut list {}
+        assert_eq!(list.state(), []);
     }
 }
