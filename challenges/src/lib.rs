@@ -1,12 +1,4 @@
-#![feature(const_destruct)]
-
-use std::{
-    borrow::Borrow,
-    cell::RefCell,
-    marker::{Destruct, PhantomData},
-    ops::ControlFlow,
-    rc::Rc,
-};
+use std::{borrow::Borrow, cell::RefCell, marker::PhantomData, ops::ControlFlow, rc::Rc};
 
 use thiserror::Error;
 
@@ -212,6 +204,7 @@ impl<T> DoublyLinkedList<T> {
     {
         #![expect(clippy::unit_arg, reason = "Beauty comes at a cost.")]
 
+        #[inline]
         fn rearrange_start<T>(start: &mut Rc<Inner<T>>) -> Option<()> {
             let right = if let Some(right) = &RefCell::borrow(start).right {
                 Rc::clone(right)
@@ -222,6 +215,7 @@ impl<T> DoublyLinkedList<T> {
             Some(*start = right)
         }
 
+        #[inline]
         fn rearrange_end<T>(end: &mut Rc<Inner<T>>) -> Option<()> {
             let left = if let Some(left) = &RefCell::borrow(end).left {
                 Rc::clone(left)
@@ -232,12 +226,14 @@ impl<T> DoublyLinkedList<T> {
             Some(*end = left)
         }
 
+        #[inline]
         fn rearrange_left<T>(left: &Rc<Inner<T>>, target: &Inner<T>) {
             RefCell::borrow_mut(left)
                 .right
                 .clone_from(&RefCell::borrow(target).right);
         }
 
+        #[inline]
         fn rearrange_right<T>(right: &Rc<Inner<T>>, target: &Inner<T>) {
             RefCell::borrow_mut(right)
                 .left
@@ -298,16 +294,28 @@ impl<T> DoublyLinkedList<T> {
     }
 }
 
-// TODO: get either the `Clone` impl to perform a shallow copy with
-// `clone_from()`, or othewise add an inherent impl method that allows cloning
-// without requiring `T: Clone`. Implement only the inherent method, and call it
-// from the below impl.
+/// Inherent implementation replacing an implementation of `Clone`, such that
+/// the `T: Clone` bound is only required with the `clone()` method, and not
+/// with the `clone_from()` method.
+impl<T> DoublyLinkedList<T> {
+    #![expect(
+        clippy::should_implement_trait,
+        reason = "Implementing the `Clone` trait forces the bound `T: Clone` at the impl level, \
+                 which constrains the uses of `clone_from()`, as that method only performs a \
+                 shallow copy. Specialization is not an option, as `clone()` (which performs a \
+                 deep copy) can't be implemented without `T: Clone`"
+    )]
 
-/// Clones values by either one of a deep or shallow copy.
-impl<T: Clone> Clone for DoublyLinkedList<T> {
-    /// Clones the entire list into a new list, performing new allocations for
-    /// all elements.
-    fn clone(&self) -> Self {
+    /// Clones the entire list allocations into a new list, and returns that new
+    /// list.
+    #[expect(
+        clippy::return_self_not_must_use,
+        reason = "It's not a bug not to use the result of this function."
+    )]
+    pub fn clone(&self) -> Self
+    where
+        T: Clone,
+    {
         self.iter()
             .map(Clone::clone)
             .fold(Self::default(), |mut list, elem| {
@@ -317,10 +325,26 @@ impl<T: Clone> Clone for DoublyLinkedList<T> {
             })
     }
 
-    fn clone_from(&mut self, source: &Self)
-    where
-        Self: Destruct,
-    {
+    /// Clones only the pointers to each element of the list, without destroying
+    /// the other list (i.e. performs a shallow copy by sharing resources.)
+    pub fn clone_from(&mut self, source: &Self) {
+        // If `self` is non-empty and isn't already being shared with some other
+        // list, then deallocate all resources in it prior to filling it anew
+        // with pointers to the `source` list.
+        if let Some(current) = &mut self.start
+            && Rc::strong_count(current) <= 2
+        {
+            let mut ptrs = Vec::new();
+            while let Some(right) = &RefCell::borrow(&Rc::clone(current)).right {
+                right.borrow_mut().left = None;
+                ptrs.push(Rc::clone(current));
+                *current = Rc::clone(right);
+            }
+            self.start = None;
+            self.end = None;
+        }
+        self.start.clone_from(&source.start);
+        self.end.clone_from(&source.end);
     }
 }
 
@@ -548,7 +572,6 @@ impl<T> Iterator for PtrIter<T> {
         let Some(start) = &self.first else {
             return None;
         };
-
         match self.current {
             None => self.current = Some(Rc::clone(start)),
             Some(ref mut indexer)
@@ -682,6 +705,30 @@ mod tests {
     // The below tests only check for the iterators to not be doing any funky
     // stuff with their allocations, and so it only makes sense to run them with
     // Miri, so as to get better diagnostics on the memory issues.
+
+    #[cfg(miri)]
+    impl<'a, T: 'a> DoublyLinkedList<T> {
+        // Doesn't use iterators because the whole point of this method is to
+        // check the state of the list across calls to the iterator methods.
+        fn state(&'a self) -> Vec<&'a T> {
+            let current = self.start.as_ref().unwrap();
+            let mut out = Vec::with_capacity(self.len);
+            out.push(&raw const RefCell::borrow(current).inner);
+            while let Some(current) = &RefCell::borrow(&Rc::clone(current)).right {
+                out.push(&raw const RefCell::borrow(current).inner);
+            }
+
+            // SAFETY: the pointers are to elements allocated in the list, so
+            // retreving a reference to the underlying value is sound with the
+            // given method lifetime bounds.
+            out.into_iter()
+                .map(|ptr| unsafe { ptr.as_ref_unchecked() })
+                .collect()
+        }
+    }
+
+    // TODO: actually test out the following, and add assertions for the length
+    // of the list in the other, non-Miri tests.
 
     #[cfg(miri)]
     #[test]
