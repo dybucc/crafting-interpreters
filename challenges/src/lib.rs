@@ -1,3 +1,5 @@
+#![feature(extend_one)]
+
 use std::{
   borrow::Borrow,
   cell::RefCell,
@@ -23,8 +25,8 @@ pub struct DoublyLinkedList<T> {
 #[derive(Error, Debug)]
 pub enum InsertElemError {
   #[error(
-    "passed index {wrong_index} out of bounds; only {actual_elements} elements\
-     available"
+    "passed index {wrong_index} out of bounds; only {actual_elements} \
+     elements available"
   )]
   IndexOutOfBounds { wrong_index: usize, actual_elements: usize },
   #[error(
@@ -84,16 +86,14 @@ impl<T> DoublyLinkedList<T> {
           *end = old;
           RefCell::borrow_mut(start).right = Some(Rc::clone(end));
         } else {
-          // SAFETY: if `start != end`, then the right of `old` ought be
-          // pointing to a non-`None` as it is the older `start` and the
-          // pointers are to the `RefCell`s and not to the actual `Node`s so the
-          // above check is the same as `old != end`.
-          unsafe {
-            RefCell::borrow_mut(
-              RefCell::borrow(&old).right.as_ref().unwrap_unchecked(),
-            )
-            .left = Some(Rc::clone(&old));
-          }
+          RefCell::borrow_mut(RefCell::borrow(&old).right.as_ref().expect(
+            "if `start != end`, then the right of `old` ought be pointing to \
+             a non-`None` as it is the older `start` and the pointers are to \
+             the `RefCell`s and not to the actual `Node`s so the above check \
+             is the same as `old != end`",
+          ))
+          .left = Some(Rc::clone(&old));
+
           RefCell::borrow_mut(start).right = Some(old);
         }
       },
@@ -108,16 +108,14 @@ impl<T> DoublyLinkedList<T> {
           *start = old;
           RefCell::borrow_mut(end).left = Some(Rc::clone(start));
         } else {
-          // SAFETY: if `start != end`, then the left of `old` ought be pointing
-          // to a non-`None` as it is the older `end` and the pointers are to
-          // the `RefCell`s and not to the actual `Node`s so the above check is
-          // the same as `start != old`.
-          unsafe {
-            RefCell::borrow_mut(
-              RefCell::borrow(&old).left.as_ref().unwrap_unchecked(),
-            )
-            .right = Some(Rc::clone(&old));
-          }
+          RefCell::borrow_mut(RefCell::borrow(&old).left.as_ref().expect(
+            "if `start != end`, then the left of `old` ought be pointing to a \
+             non-`None` as it is the older `end` and the pointers are to the \
+             `RefCell`s and not to the actual `Node`s so the above check is \
+             the same as `start != old`",
+          ))
+          .right = Some(Rc::clone(&old));
+
           RefCell::borrow_mut(end).left = Some(old);
         }
       },
@@ -132,8 +130,6 @@ impl<T> DoublyLinkedList<T> {
   ) -> Result<(), InsertElemError> {
     self.start.as_ref().ok_or(InsertElemError::EmptyList)?;
     let new = Node { left: None, right: None, inner: other.into() };
-    // SAFETY: `result` can never be `None` because the list is checked
-    // for emptyness at the start of the method.
     let (ControlFlow::Break((len, elem)) | ControlFlow::Continue((len, elem))) =
       self
         .ptr_iter()
@@ -145,8 +141,18 @@ impl<T> DoublyLinkedList<T> {
             ControlFlow::Continue(Some((Some(inner_idx + 1), ptr)))
           }
         })
-        .map_continue(|result| unsafe { result.unwrap_unchecked() })
-        .map_break(|result| unsafe { result.unwrap_unchecked() });
+        .map_continue(|result| {
+          result.expect(
+            "`result` can never be `None` because the list is checked for \
+             emptyness at the start of the method",
+          )
+        })
+        .map_break(|result| {
+          result.expect(
+            "`result` can never be `None` because the list is checked for \
+             emptyness at the start of the method",
+          )
+        });
     if let Some(len) = len {
       return Err(InsertElemError::IndexOutOfBounds {
         wrong_index:     idx,
@@ -342,6 +348,11 @@ impl<T> DoublyLinkedList<T> {
       }
       self.start = None;
       self.end = None;
+      // See the `Drop` impl for details on why each pointer must be dropped
+      // sequentially.
+      for ptr in ptrs {
+        drop(ptr);
+      }
     }
     self.start.clone_from(&source.start);
     self.end.clone_from(&source.end);
@@ -415,7 +426,7 @@ impl<T> Drop for DoublyLinkedList<T> {
           }));
         }
         _ => {
-          // Elements are dropped sequentially, because an invariant holds such
+          // Elements are dropped sequentially because an invariant holds such
           // that, at this point, each element has only two pointers pointing to
           // it at any time; The pointer in the vector that we are traversing,
           // and the pointer from the prior element in the vector. Thus,
@@ -423,8 +434,8 @@ impl<T> Drop for DoublyLinkedList<T> {
           // pointer to the currently iterated-over pointer in the vector. This
           // is possible because there is only a single pointer to the first
           // element of the list/vector; The first element of the vector itself.
-          for elem in ptrs {
-            drop(elem);
+          for ptr in ptrs {
+            drop(ptr);
           }
         }
     }
@@ -477,6 +488,10 @@ impl<T, A: Into<T>> Extend<A> for DoublyLinkedList<T> {
   fn extend<I: IntoIterator<Item = A>>(&mut self, iter: I) {
     self.append(Self::from_iter(iter));
   }
+
+  fn extend_one(&mut self, item: A) {
+    insert!(self, item);
+  }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -517,10 +532,10 @@ impl<T> Iterator for IntoIter<T> {
               .expect("the first element of the list should be isolated here"),
           )
         },
-        // It's worth it *not* to keep an exclusive reference to the
-        // option's generic parameter so that we can mutate both the
-        // underlying value with `unwrap()` and the whole option through
-        // field projection on `self`.
+        // It's worth it *not* to keep an exclusive reference to the option's
+        // generic parameter so that we can mutate both the underlying value
+        // with `unwrap()` and the whole option through field projection on
+        // `self`.
         | next_option @ Some(_) => {
           let current_ptr = Rc::clone(next_option.as_ref().unwrap());
           if Rc::ptr_eq(
@@ -815,10 +830,91 @@ mod tests {
     ]);
   }
 
+  #[test]
+  fn clone_from_empty_list() {
+    let (mut list1, list2): (DoublyLinkedList<&str>, DoublyLinkedList<&str>) = (
+      DoublyLinkedList::from_iter::<[&str; _]>([]),
+      DoublyLinkedList::from_iter(["one", "other"]),
+    );
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), []);
+    itertools::assert_equal(list2.iter().map(Deref::deref), ["one", "other"]);
+    list1.clone_from(&list2);
+    itertools::assert_equal(list1.iter().map(Deref::deref), ["one", "other"]);
+    itertools::assert_equal(list2.iter().map(Deref::deref), ["one", "other"]);
+    // Ensures the destructor for `list2` runs properly by getting rid of the
+    // other references to its first and last element.
+    list1.start = None;
+    list1.end = None;
+  }
+
+  #[test]
+  fn clone_empty_list() {
+    let (mut list1, list2): (DoublyLinkedList<&str>, DoublyLinkedList<&str>) = (
+      DoublyLinkedList::from_iter(["one", "other"]),
+      DoublyLinkedList::from_iter::<[&str; _]>([]),
+    );
+    itertools::assert_equal(list1.iter().map(Deref::deref), ["one", "other"]);
+    itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), []);
+    list1.clone_from(&list2);
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), []);
+    itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), []);
+  }
+
+  #[test]
+  fn clone_non_empty_lists() {
+    let (mut list1, list2): (DoublyLinkedList<&str>, DoublyLinkedList<&str>) = (
+      DoublyLinkedList::from_iter(["Something", "else"]),
+      DoublyLinkedList::from_iter(["other", "one"]),
+    );
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), [
+      "Something", "else",
+    ]);
+    itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), [
+      "other", "one",
+    ]);
+    list1.clone_from(&list2);
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), [
+      "other", "one",
+    ]);
+    itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), [
+      "other", "one",
+    ]);
+    // Ensures the destructor for `list2` runs properly by getting rid of the
+    // other references to its first and last element.
+    list1.start = None;
+    list1.end = None;
+  }
+
+  #[test]
+  fn deep_clone() {
+    let list1: DoublyLinkedList<&str> =
+      DoublyLinkedList::from_iter(["something", "else"]);
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), [
+      "something", "else",
+    ]);
+    let list2 = list1.clone();
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), [
+      "something", "else",
+    ]);
+    itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), [
+      "something", "else",
+    ]);
+  }
+
+  #[test]
+  fn deep_clone_empty_list() {
+    let list1: DoublyLinkedList<&str> =
+      DoublyLinkedList::from_iter::<[&str; _]>([]);
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), []);
+    let list2 = list1.clone();
+    itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), []);
+    itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), []);
+  }
+
   // NOTE:
   // The below tests only check for the iterators to not be doing any funky
   // stuff with their allocations, and so it only makes sense to run them with
-  // Miri, so as to get better diagnostics on the memory issues.
+  // Miri, so as to get better diagnostics.
 
   #[cfg(miri)]
   mod miri {
