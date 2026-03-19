@@ -407,6 +407,8 @@ impl<T> Drop for DoublyLinkedList<T> {
       return;
     };
     let mut ptrs = Vec::new();
+    // This converts the doubly linked list into a singly-linked list and
+    // produces pointers to all elements.
     while let Some(right) = &RefCell::borrow(&Rc::clone(current)).right {
       RefCell::borrow_mut(right).left = None;
       ptrs.push(Rc::clone(current));
@@ -414,31 +416,20 @@ impl<T> Drop for DoublyLinkedList<T> {
     }
     self.start = None;
     self.end = None;
-    cfg_select! {
-        debug_assertions => {
-          assert!(ptrs.into_iter().enumerate().all(|(idx, ptr)| {
-            let strong_count = Rc::strong_count(&ptr);
-            eprintln!(
-              "element idx: {idx}\nelement strong count: {strong_count}"
-            );
+    // At this point, all elements of the `ptrs` vector have either strong
+    // counts equal to 1 or 2. All elements but the first are of the latter
+    // variety, as they have the prior node in the list still pointing to them.
+    // Regardless of the drop order in the vector, all nodes are dealloacted
+    // because decreasing the strong count for all such pointers will force the
+    // first pointer to be destroyed, and all nodes after it would follow suit.
+    // In a way, it's an implicit sequential drop order, triggered only after
+    // the vector is dropped whole.
+    debug_assert!(ptrs.into_iter().enumerate().all(|(idx, ptr)| {
+      let strong_count = Rc::strong_count(&ptr);
+      eprintln!("element idx: {idx}\nelement strong count: {strong_count}");
 
-            strong_count == 1
-          }));
-        }
-        _ => {
-          // Elements are dropped sequentially because an invariant holds such
-          // that, at this point, each element has only two pointers pointing to
-          // it at any time; The pointer in the vector that we are traversing,
-          // and the pointer from the prior element in the vector. Thus,
-          // dropping each element in serial allows to have only a single
-          // pointer to the currently iterated-over pointer in the vector. This
-          // is possible because there is only a single pointer to the first
-          // element of the list/vector; The first element of the vector itself.
-          for ptr in ptrs {
-            drop(ptr);
-          }
-        }
-    }
+      strong_count == 1
+    }));
   }
 }
 
