@@ -348,11 +348,6 @@ impl<T> DoublyLinkedList<T> {
       }
       self.start = None;
       self.end = None;
-      // See the `Drop` impl for details on why each pointer must be dropped
-      // sequentially.
-      for ptr in ptrs {
-        drop(ptr);
-      }
     }
     self.start.clone_from(&source.start);
     self.end.clone_from(&source.end);
