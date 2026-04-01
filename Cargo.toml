@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["challenges"]
+members = ["jlox","linked-list"]
 
 [workspace.lints.clippy]
 pedantic = "warn"

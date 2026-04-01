@@ -46,16 +46,38 @@ few million block matrix gaxpys) if the computations were to be coded as chains
 of higher order functions with closures that capture state and force it to have
 an extended lifetime.
 
-In the same vein, can Lox closures be assumed to stop requiring regular stack
-frame-based variable tracking the moment they are declared within a lexical
-scope, or can it be assumed that some form of chained tracking is performed on
-the functions that _both_ capture state from the surrounding lexical scope and
-are part of the same lexical scope. If for some lexical scopes $A, B$, it holds
-that $A subset.neq B$, how does Lox handle variable capturing? Surely a naive
-approach that took the route of chained tracking would make closure-heavy
-programs severely underperform.
+Much in the same vein, can Lox closures be assumed to stop requiring regular
+stack frame-based variable tracking the moment they are declared within a
+lexical scope, or can it be assumed that some form of chained tracking is
+performed on the functions that _both_ capture state from the surrounding
+lexical scope and are part of the same lexical scope. If for some lexical scopes
+$A, B$, it holds that $A subset.neq B$, how does Lox handle variable capturing?
+Surely a naive approach that took the route of chained tracking would make
+closure-heavy programs severely underperform. This would be a hard-pressed issue
+to solve beyond just getting rid of the GC altogether or otherwise coming up
+with a specific strategy for capturing (and _non_-capturing) closures.
 
 Also, are there any values that qualify as being constant, and thus require not
-being mutated throughout the program?
+being mutated throughout the program? These should likely be at least considered
+in the way Rust does it. This would imply using some default specification for
+non-mutable variables, and some other (possibly additional and not completely
+different) keyword for implying mutability.
 
 3. Think about annoying things that don't make Lox usable in real life.
+
+Something that is both left unspecified and would quite possibly cause issues is
+the interaction of differing types, that don't necessarily align with the right
+abstract type classes (in the type theoretical sense.) This would imply that
+some two different types would only correlate for, say, addition, in whichever
+way runtime support was given to type resolution. The solution to this would
+likely go through getting rid of a dynamic solution altogether.
+
+Serialization/deserialization is likely another huge pain point, because the
+type theory in the language is weak. This would make things as comfortable as
+`serde`'s implementation infeasible, in part also due to the prior argument.
+
+Barring the fact that the standard library is non-existent, there should at
+least be some form of low-level interaction with the system such that language
+users could build abstractions over OS primitives. This should go through
+performing interop with C, though this likely also implies that there ought be
+some interface to other languages, even if it's indirect through C.

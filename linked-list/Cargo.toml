@@ -1,0 +1,22 @@
+[package]
+name = "linked-list"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+license.workspace = true
+readme.workspace = true
+
+[features]
+default = ["hash_ptr"]
+hash_elem = []
+hash_ptr = []
+
+[lints]
+workspace = true
+
+[dependencies]
+itertools = "0.14.0"
+thiserror = "2.0.18"
