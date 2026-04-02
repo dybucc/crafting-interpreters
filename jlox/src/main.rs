@@ -1,9 +1,10 @@
 #![feature(unboxed_closures, tuple_trait, fn_traits)]
 
 use std::{
+  borrow::Cow,
   convert::Infallible,
-  fs::{self, File},
-  io::{self, BufReader, Read},
+  fs::{self},
+  io::{self, BufRead, StdoutLock, Write},
   marker::Tuple,
   path::Path,
   process,
@@ -11,6 +12,7 @@ use std::{
 
 use anyhow::Ok;
 use clap::Parser;
+use thiserror::Error;
 
 #[derive(Debug, Parser)]
 #[command(disable_version_flag = true, disable_help_subcommand = true)]
@@ -19,7 +21,7 @@ pub(crate) struct Args {
 }
 
 #[derive(Debug)]
-pub(crate) enum Error {
+pub(crate) enum SysExitsError {
   Usage,
   DataErr,
   NoInput,
@@ -37,11 +39,11 @@ pub(crate) enum Error {
   Config,
 }
 
-impl Error {
+impl SysExitsError {
   pub(crate) fn into_result(self) -> anyhow::Result<Self> { Ok(self) }
 }
 
-impl<A: Tuple> FnOnce<A> for Error {
+impl<A: Tuple> FnOnce<A> for SysExitsError {
   type Output = Infallible;
 
   extern "rust-call" fn call_once(self, _: A) -> Self::Output {
@@ -65,19 +67,39 @@ impl<A: Tuple> FnOnce<A> for Error {
   }
 }
 
+#[derive(Debug, Error)]
+#[error("")]
+pub(crate) struct Error {
+  line: usize,
+  msg:  Cow<'static, str>,
+}
+
 fn main() -> anyhow::Result<()> {
   match Args::parse() {
     | Args { script: Some(file) } => run_file(Path::new(&file)),
-    | _ => run(io::stdin()),
+    | _ => run_prompt(),
   }
 }
 
 pub(crate) fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
-  run(File::open(file)?)
+  let mut stdout = io::stdout().lock();
+  run(&fs::read_to_string(file)?, stdout.by_ref())
 }
 
-pub(crate) fn run(input: impl Read) -> anyhow::Result<()> {
-  let reader = BufReader::new(input);
+pub(crate) fn run_prompt() -> anyhow::Result<()> {
+  let (mut stdout, mut stdin, mut buf) =
+    (io::stdout().lock(), io::stdin().lock(), String::new());
 
+  loop {
+    write!(stdout, "> ")?;
+    stdout.flush()?;
+    match stdin.read_line(&mut buf)? {
+      | 0 => break Ok(()),
+      | _ => (run(&buf, stdout.by_ref())?, buf.clear()).0,
+    }
+  }
+}
+
+pub(crate) fn run(input: &str, stdout: &mut StdoutLock) -> anyhow::Result<()> {
   Ok(())
 }
