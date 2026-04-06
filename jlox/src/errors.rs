@@ -1,4 +1,10 @@
-use std::{borrow::Cow, convert::Infallible, marker::Tuple, process};
+use std::{
+  borrow::Cow,
+  convert::Infallible,
+  fmt::{Debug, Display},
+  marker::{PhantomData, Tuple},
+  process,
+};
 
 use anyhow::{Context, anyhow};
 use thiserror::Error;
@@ -62,15 +68,29 @@ impl<A: Tuple> FnOnce<A> for SysExitsError {
 }
 
 #[derive(Debug)]
-pub(crate) struct Error {
-  line: usize,
-  msg:  Cow<'static, str>,
+pub(crate) struct Error<T> {
+  trace:   Box<dyn ErrorTrace>,
+  msg:     Cow<'static, str>,
+  _marker: PhantomData<T>,
 }
 
-impl<A: Tuple> FnOnce<A> for Error {
-  type Output = anyhow::Result<()>;
+impl<T> Error<T> {
+  pub(crate) fn new(
+    trace: Box<dyn ErrorTrace>,
+    msg: Option<Cow<'static, str>>,
+  ) -> Self {
+    Self { trace, msg: msg.unwrap_or_else(|| "".into()), _marker: PhantomData }
+  }
+}
+
+impl<A: Tuple, T> FnOnce<A> for Error<T> {
+  type Output = anyhow::Result<T>;
 
   extern "rust-call" fn call_once(self, _: A) -> Self::Output {
-    Result::Err(anyhow!("line: {}", self.line)).context(self.msg)
+    Result::Err(anyhow!(self.msg)).context(self.trace.build())
   }
+}
+
+pub(crate) trait ErrorTrace: Display + Debug {
+  fn build(&self) -> Cow<'static, str> { format!("{self}").into() }
 }

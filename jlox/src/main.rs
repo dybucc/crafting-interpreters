@@ -14,7 +14,13 @@ pub(crate) mod args;
 pub(crate) mod errors;
 
 pub(crate) use crate::args::Args;
-#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = ""))]
+#[cfg_attr(
+  not(test),
+  expect(
+    clippy::wildcard_imports,
+    reason = "Errors are meant to be wildard-imported."
+  )
+)]
 pub(crate) use crate::errors::*;
 
 fn main() -> anyhow::Result<()> {
@@ -31,18 +37,17 @@ pub(crate) fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
 pub(crate) fn run_prompt() -> anyhow::Result<()> {
   iter::once((io::stdout().lock(), io::stdin().lock(), String::new()))
     .try_for_each(|(mut stdout, mut stdin, mut buf)| {
-      loop {
-        iter::once((
+      iter::once(()).cycle().try_for_each(|()| {
+        (
           write!(stdout, "> ")?,
           stdout.flush()?,
           match stdin.read_line(&mut buf)? {
-            | 0 => break Ok(()),
-            | _ => (run(&buf, stdout.by_ref())?, buf.clear()).0,
+            | 0 => Ok(()),
+            | _ => (run(&buf, stdout.by_ref()), buf.clear()).0,
           },
-        ))
-        .next()
-        .unwrap();
-      }
+        )
+          .2
+      })
     })
 }
 
