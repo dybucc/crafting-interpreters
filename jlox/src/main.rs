@@ -1,11 +1,9 @@
 #![feature(unboxed_closures, tuple_trait, fn_traits)]
 
 use std::{
-  fs,
-  io::{self, BufRead, StdoutLock, Write},
-  iter,
-  ops::ControlFlow,
-  path::Path,
+    fs,
+    io::{self, BufRead, StdoutLock, Write},
+    path::Path,
 };
 
 use anyhow::Ok;
@@ -16,48 +14,42 @@ pub(crate) mod errors;
 
 pub(crate) use crate::args::Args;
 #[cfg_attr(
-  not(test),
-  expect(
-    clippy::wildcard_imports,
-    reason = "Errors are meant to be wildard-imported."
-  )
+    not(test),
+    expect(
+        clippy::wildcard_imports,
+        reason = "Errors are meant to be wildard-imported."
+    )
 )]
 pub(crate) use crate::errors::*;
 
 fn main() -> anyhow::Result<()> {
-  match Args::parse() {
-    | Args { script: Some(file) } => run_file(Path::new(&file)),
-    | _ => run_prompt(),
-  }
+    let args = Args::parse();
+    if let Some(file) = args.script {
+        run_file(&file)?;
+    } else {
+        run_prompt()?;
+    }
+    Ok(())
 }
 
 pub(crate) fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
-  Ok(run(&fs::read_to_string(file)?, &mut io::stdout().lock())?)
+    let file = fs::read_to_string(file)?;
+    let mut stdout = io::stdout().lock();
+    run(&file, &mut stdout)?;
+    Ok(())
 }
 
 pub(crate) fn run_prompt() -> anyhow::Result<()> {
-  iter::once((io::stdout().lock(), io::stdin().lock(), String::new()))
-    .try_for_each(|(mut stdout, mut stdin, mut buf)| {
-      iter::once(()).cycle().try_for_each(|()| {
-        (
-          write!(stdout, "> ")?,
-          stdout.flush()?,
-          match stdin.read_line(&mut buf)? {
-            | 0 => ControlFlow::Break(Ok(())),
-            | _ => match (run(&buf, stdout.by_ref()), buf.clear()).0 {
-              | Err(e) => match e.downcast::<Error>() {
-                | Result::Ok(_) => todo!(),
-                | Result::Err(e) => ControlFlow::Break(Err(e)),
-              },
-              | _ => ControlFlow::Continue(()),
-            },
-          },
-        )
-          .2
-      })
-    })
+    let mut stdout = io::stdout().lock();
+    let mut stdin = io::stdin().lock();
+    let mut buf = String::new();
+    loop {
+        write!(stdout, ">")?;
+        stdout.flush()?;
+        stdin.read_line(&mut buf)?;
+    }
 }
 
 pub(crate) fn run(input: &str, stdout: &mut StdoutLock) -> anyhow::Result<()> {
-  Ok(())
+    Ok(())
 }
