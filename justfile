@@ -11,7 +11,7 @@ cargo := require("cargo")
 default:
     {{ just_executable() }} --list --unsorted --justfile {{ justfile() }}
 
-# runs a command for either the given workspace member or the pwd
+# runs a command for either the given workspace member or in the pwd
 run command="":
     {{ cargo }} r 2> /dev/null -- {{ command }}
 

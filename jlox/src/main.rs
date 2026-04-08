@@ -4,6 +4,7 @@ use std::{
   fs,
   io::{self, BufRead, StdoutLock, Write},
   iter,
+  ops::ControlFlow,
   path::Path,
 };
 
@@ -42,8 +43,14 @@ pub(crate) fn run_prompt() -> anyhow::Result<()> {
           write!(stdout, "> ")?,
           stdout.flush()?,
           match stdin.read_line(&mut buf)? {
-            | 0 => Ok(()),
-            | _ => (run(&buf, stdout.by_ref()), buf.clear()).0,
+            | 0 => ControlFlow::Break(Ok(())),
+            | _ => match (run(&buf, stdout.by_ref()), buf.clear()).0 {
+              | Err(e) => match e.downcast::<Error>() {
+                | Result::Ok(_) => todo!(),
+                | Result::Err(e) => ControlFlow::Break(Err(e)),
+              },
+              | _ => ControlFlow::Continue(()),
+            },
           },
         )
           .2

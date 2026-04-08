@@ -1,96 +1,44 @@
 use std::{
   borrow::Cow,
-  convert::Infallible,
   fmt::{Debug, Display},
-  marker::{PhantomData, Tuple},
-  process,
+  marker::Tuple,
 };
 
 use anyhow::{Context, anyhow};
 use thiserror::Error;
 
+// NOTE: the `Display` impl only reflects the immediate message returned by the
+// error, and not the backtrace. This is intentional, as only calling in to the
+// function that the `Error` type implements actually yields a `Result` with
+// context provided by the backtrace.
 #[derive(Debug, Error)]
-pub(crate) enum SysExitsError {
-  #[error("command used incorrectly")]
-  Usage,
-  #[error("input data was incorrect")]
-  DataErr,
-  #[error("input file did not exist/was not readable")]
-  NoInput,
-  #[error("specified user did not exist")]
-  NoUser,
-  #[error("specified host did not exist")]
-  NoHost,
-  #[error("service unavailable")]
-  Unavailable,
-  #[error("internal software error")]
-  Software,
-  #[error("operating system error")]
-  OsErr,
-  #[error("system file error (can't create/read)")]
-  OsFile,
-  #[error("user output file can't be created")]
-  CantCreat,
-  #[error("io error while handling file")]
-  IoErr,
-  #[error("temporary failure; retry")]
-  TempFail,
-  #[error("remote system returned invalid protocol message")]
-  Protocol,
-  #[error("not enough permissions to perform operation")]
-  NoPerm,
-  #[error("uncofigured or misconfigured state found")]
-  Config,
+#[error("{msg}")]
+pub(crate) struct Error {
+  trace: Box<dyn ErrorTrace>,
+  msg:   Cow<'static, str>,
 }
 
-impl<A: Tuple> FnOnce<A> for SysExitsError {
-  type Output = Infallible;
-
-  extern "rust-call" fn call_once(self, _: A) -> Self::Output {
-    match self {
-      | Self::Usage => process::exit(64),
-      | Self::DataErr => process::exit(65),
-      | Self::NoInput => process::exit(66),
-      | Self::NoUser => process::exit(67),
-      | Self::NoHost => process::exit(68),
-      | Self::Unavailable => process::exit(69),
-      | Self::Software => process::exit(70),
-      | Self::OsErr => process::exit(71),
-      | Self::OsFile => process::exit(72),
-      | Self::CantCreat => process::exit(73),
-      | Self::IoErr => process::exit(74),
-      | Self::TempFail => process::exit(75),
-      | Self::Protocol => process::exit(76),
-      | Self::NoPerm => process::exit(77),
-      | Self::Config => process::exit(78),
-    }
-  }
-}
-
-#[derive(Debug)]
-pub(crate) struct Error<T> {
-  trace:   Box<dyn ErrorTrace>,
-  msg:     Cow<'static, str>,
-  _marker: PhantomData<T>,
-}
-
-impl<T> Error<T> {
+impl Error {
   pub(crate) fn new(
     trace: Box<dyn ErrorTrace>,
     msg: Option<Cow<'static, str>>,
   ) -> Self {
-    Self { trace, msg: msg.unwrap_or_else(|| "".into()), _marker: PhantomData }
+    Self { trace, msg: msg.unwrap_or_else(|| "".into()) }
   }
 }
 
-impl<A: Tuple, T> FnOnce<A> for Error<T> {
-  type Output = anyhow::Result<T>;
+impl<A: Tuple> FnOnce<A> for Error {
+  type Output = anyhow::Result<()>;
 
   extern "rust-call" fn call_once(self, _: A) -> Self::Output {
+    // The result of this would be an error where the main source of truth would
+    // be the error backtrace, left to the implementor's discretion, and a
+    // further source of truth (in the `Caused by` section of the error)
+    // containing some other error message.
     Result::Err(anyhow!(self.msg)).context(self.trace.build())
   }
 }
 
-pub(crate) trait ErrorTrace: Display + Debug {
+pub(crate) trait ErrorTrace: Display + Debug + Send + Sync {
   fn build(&self) -> Cow<'static, str> { format!("{self}").into() }
 }
