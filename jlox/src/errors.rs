@@ -14,13 +14,16 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[error("{msg}")]
 pub(crate) struct Error {
-    trace: Box<dyn ErrorTrace>,
-    msg: Cow<'static, str>,
+    pub(crate) trace: Box<dyn ErrorTrace>,
+    pub(crate) msg: Cow<'static, str>,
 }
 
 impl Error {
     pub(crate) fn new(trace: Box<dyn ErrorTrace>, msg: Option<Cow<'static, str>>) -> Self {
-        let msg = msg.unwrap_or_else(|| "".into());
+        let msg = {
+            let into_map = || "".into();
+            msg.unwrap_or_else(into_map)
+        };
         Self { trace, msg }
     }
 }
@@ -29,16 +32,21 @@ impl<A: Tuple> FnOnce<A> for Error {
     type Output = anyhow::Result<()>;
 
     extern "rust-call" fn call_once(self, _: A) -> Self::Output {
-        // The result of this would be an error where the main source of truth would
-        // be the error backtrace, left to the implementor's discretion, and a
-        // further source of truth (in the `Caused by` section of the error)
-        // containing some other error message.
-        Result::Err(anyhow!(self.msg)).context(self.trace.build())
+        // The result of this would be an error where the main source of truth would be
+        // the error backtrace, left to the implementor's discretion, and a further
+        // source of truth (in the `Caused by` section of the error) containing some
+        // arbitrary error message.
+        let Self { trace, msg } = self;
+        let err = anyhow!(msg);
+        let trace = trace.build();
+        let res = Err(err);
+        res.context(trace)
     }
 }
 
 pub(crate) trait ErrorTrace: Display + Debug + Send + Sync {
     fn build(&self) -> Cow<'static, str> {
-        format!("{self}").into()
+        let msg = format!("{self}");
+        msg.into()
     }
 }
