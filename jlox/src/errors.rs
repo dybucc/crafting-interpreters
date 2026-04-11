@@ -1,7 +1,6 @@
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
-    marker::Tuple,
 };
 
 use anyhow::{Context, anyhow};
@@ -26,12 +25,8 @@ impl Error {
         };
         Self { trace, msg }
     }
-}
 
-impl<A: Tuple> FnOnce<A> for Error {
-    type Output = anyhow::Result<()>;
-
-    extern "rust-call" fn call_once(self, _: A) -> Self::Output {
+    pub(crate) fn into_result(self) -> anyhow::Result<()> {
         // The result of this would be an error where the main source of truth would be
         // the error backtrace, left to the implementor's discretion, and a further
         // source of truth (in the `Caused by` section of the error) containing some

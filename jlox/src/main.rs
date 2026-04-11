@@ -1,4 +1,4 @@
-#![feature(unboxed_closures, tuple_trait, fn_traits)]
+#![feature(unboxed_closures)]
 
 use std::{
     fs,
@@ -53,6 +53,10 @@ pub(crate) fn run_prompt() -> anyhow::Result<()> {
         let stdin = io::stdin();
         stdin.lock()
     };
+    // We don't hold a lock here because language use errors are reported through
+    // `stderr` with `std::result::Result`'s impl of `Termination`, which writes to
+    // stderr.
+    let mut stderr = io::stderr();
     let mut buf = String::new();
     loop {
         let res = write!(stdout, ">");
@@ -64,13 +68,17 @@ pub(crate) fn run_prompt() -> anyhow::Result<()> {
         let res = run(&buf, &mut stdout);
         if let Err(err) = res {
             // If the error is a recognized error (i.e. `crate::errors::Error`,) then report
-            // it and keep going. This only happens when running interactively,
-            // so if there's a failure while running a script loaded from a
-            // file, the whole thing just bails out.
-            let try_downcast = err.downcast::<Error>();
-            if let Ok(lang_err) = try_downcast {
-                let res = lang_err();
-                res.report();
+            // it and keep going. This only happens when running interactively, so if
+            // there's a failure while running a script loaded from a file, the whole thing
+            // just bails out.
+            match err.downcast::<Error>() {
+                Ok(lang_err) => {
+                    let res = lang_err.into_result();
+                    res.report();
+                    let res = writeln!(stderr);
+                    res?;
+                }
+                Err(other_error) => break Err(other_error),
             }
         }
     }
