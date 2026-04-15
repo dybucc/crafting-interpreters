@@ -1,5 +1,3 @@
-#![feature(unboxed_closures)]
-
 use std::{
     fs,
     io::{self, BufRead, StdoutLock, Write},
@@ -7,12 +5,19 @@ use std::{
     process::Termination,
 };
 
+use anyhow::anyhow;
 use clap::Parser;
+use thiserror::Error;
 
-pub(crate) mod args;
-pub(crate) mod errors;
+mod args;
+mod errors;
+#[macro_use]
+mod macros;
+mod support;
 
-pub(crate) use crate::args::Args;
+extern crate self as jlox;
+
+pub(crate) use jlox::args::Args;
 #[cfg_attr(
     not(test),
     expect(
@@ -20,12 +25,10 @@ pub(crate) use crate::args::Args;
         reason = "Errors are meant to be wildard-imported."
     )
 )]
-pub(crate) use crate::errors::*;
+pub(crate) use jlox::errors::*;
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-    let Args { script } = args;
-    if let Some(file) = script {
+    if let Args { script: Some(file) } = Args::parse() {
         run_file(&file)
     } else {
         run_prompt()
@@ -33,57 +36,46 @@ fn main() -> anyhow::Result<()> {
 }
 
 pub(crate) fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
-    let file = {
-        let res = fs::read_to_string(file);
-        res?
-    };
-    let mut stdout = {
-        let stdout = io::stdout();
-        stdout.lock()
-    };
-    run(&file, &mut stdout)
+    run(&fs::read_to_string(file)?, &mut io::stdout().lock())
 }
 
 pub(crate) fn run_prompt() -> anyhow::Result<()> {
-    let mut stdout = {
-        let stdout = io::stdout();
-        stdout.lock()
-    };
-    let mut stdin = {
-        let stdin = io::stdin();
-        stdin.lock()
-    };
-    // We don't hold a lock here because language use errors are reported through
-    // `stderr` with `std::result::Result`'s impl of `Termination`, which writes to
-    // stderr.
+    // NOTE: we don't hold a lock with `stderr` because language errors are reported
+    // through it with `Result`'s impl of `Termination`, which itself also writes to
+    // `stderr`.
+    let mut stdout = io::stdout().lock();
+    let mut stdin = io::stdin().lock();
     let mut stderr = io::stderr();
+
     let mut buf = String::new();
+
     loop {
-        let res = write!(stdout, ">");
-        res?;
-        let res = stdout.flush();
-        res?;
-        let res = stdin.read_line(&mut buf);
-        res?;
-        let res = run(&buf, &mut stdout);
-        if let Err(err) = res {
-            // If the error is a recognized error (i.e. `crate::errors::Error`,) then report
-            // it and keep going. This only happens when running interactively, so if
-            // there's a failure while running a script loaded from a file, the whole thing
-            // just bails out.
-            match err.downcast::<Error>() {
+        writef!(stdout, "> ")?;
+
+        // NOTE: I already tried having the `into()` call be right outside the loop, but
+        // that still means the expression that the loop evaluates to is of differing
+        // types with `other_error`'s (later down the line.)
+        match stdin.read_line(&mut buf) {
+            Ok(0) => break writef!(stderr).map_err(Into::into),
+            Err(err) => break Err(Into::into(err)),
+            _ => (),
+        }
+
+        if let Err(err) = run(buf.trim_ascii_end(), &mut stdout) {
+            match err.downcast::<jlox::Error>() {
                 Ok(lang_err) => {
-                    let res = lang_err.into_result();
-                    res.report();
-                    let res = writeln!(stderr);
-                    res?;
+                    writef!(stderr)?;
+                    lang_err.into_result().report();
+                    writef!(stderr)?;
                 }
                 Err(other_error) => break Err(other_error),
             }
         }
+
+        buf.clear();
     }
 }
 
 pub(crate) fn run(input: &str, stdout: &mut StdoutLock) -> anyhow::Result<()> {
-    anyhow::Ok(())
+    Ok(())
 }

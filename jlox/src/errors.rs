@@ -1,47 +1,53 @@
-use std::{
-    borrow::Cow,
-    fmt::{Debug, Display},
-};
+//! This module holds the basic error interface of all language errors. The
+//! mechanism is fairly strightforward, as each error is meant to implement one
+//! or two of two traits; Namely, `ErrorTrace` and/or `ToError`.
+//!
+//! The former provides the backtrace of the error, which by default returns the
+//! `Display` representation of the error. The latter is optional, as it allows
+//! customizing the implementation of the conversion to `Error` by providing an
+//! additional error message, if it has one. This is shown in the `Caused by`
+//! section of `anyhow::Error` (which itself gets called from `Result`'s impl of
+//! `Termination`.)
+
+use std::{borrow::Cow, error::Error as StdError, fmt::Debug};
 
 use anyhow::{Context, anyhow};
 use thiserror::Error;
 
-// NOTE: the `Display` impl only reflects the immediate message returned by the
-// error, and not the backtrace. This is intentional, as only calling in to the
-// function that the `Error` type implements actually yields a `Result` with
-// context provided by the backtrace.
 #[derive(Debug, Error)]
-#[error("{msg}")]
+#[error("{}", .trace.build())]
 pub(crate) struct Error {
     pub(crate) trace: Box<dyn ErrorTrace>,
-    pub(crate) msg: Cow<'static, str>,
+    pub(crate) msg: Option<Cow<'static, str>>,
+}
+
+pub(crate) trait ToError: ErrorTrace
+where
+    for<'a> Self: Sized + 'a,
+{
+    fn convert(self, msg: Option<Cow<'static, str>>) -> Error {
+        Error {
+            trace: Box::new(self) as Box<dyn ErrorTrace>,
+            msg,
+        }
+    }
 }
 
 impl Error {
-    pub(crate) fn new(trace: Box<dyn ErrorTrace>, msg: Option<Cow<'static, str>>) -> Self {
-        let msg = {
-            let into_map = || "".into();
-            msg.unwrap_or_else(into_map)
-        };
-        Self { trace, msg }
-    }
-
     pub(crate) fn into_result(self) -> anyhow::Result<()> {
-        // The result of this would be an error where the main source of truth would be
-        // the error backtrace, left to the implementor's discretion, and a further
-        // source of truth (in the `Caused by` section of the error) containing some
-        // arbitrary error message.
         let Self { trace, msg } = self;
-        let err = anyhow!(msg);
-        let trace = trace.build();
-        let res = Err(err);
-        res.context(trace)
+        let err = anyhow!(trace.build());
+
+        if let Some(msg) = msg {
+            Err(err).context(msg)
+        } else {
+            Err(err)
+        }
     }
 }
 
-pub(crate) trait ErrorTrace: Display + Debug + Send + Sync {
+pub(crate) trait ErrorTrace: StdError + Send + Sync {
     fn build(&self) -> Cow<'static, str> {
-        let msg = format!("{self}");
-        msg.into()
+        format!("{self}").into()
     }
 }
