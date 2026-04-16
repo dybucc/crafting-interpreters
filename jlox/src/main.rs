@@ -1,23 +1,22 @@
 use std::{
     fs,
-    io::{self, BufRead, StdoutLock, Write},
+    io::{self, BufRead, Write},
     path::Path,
     process::Termination,
 };
 
-use anyhow::anyhow;
 use clap::Parser;
-use thiserror::Error;
 
 mod args;
 mod errors;
 #[macro_use]
 mod macros;
+mod runtime;
 mod support;
+mod tokenizer;
 
 extern crate self as jlox;
 
-pub(crate) use jlox::args::Args;
 #[cfg_attr(
     not(test),
     expect(
@@ -26,6 +25,7 @@ pub(crate) use jlox::args::Args;
     )
 )]
 pub(crate) use jlox::errors::*;
+pub(crate) use jlox::{args::Args, runtime::run};
 
 fn main() -> anyhow::Result<()> {
     if let Args { script: Some(file) } = Args::parse() {
@@ -74,8 +74,4 @@ pub(crate) fn run_prompt() -> anyhow::Result<()> {
 
         buf.clear();
     }
-}
-
-pub(crate) fn run(input: &str, stdout: &mut StdoutLock) -> anyhow::Result<()> {
-    Ok(())
 }
