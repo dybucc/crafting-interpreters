@@ -1,3 +1,5 @@
+#![feature(seek_stream_len, slice_split_once)]
+
 use std::{
     fs,
     io::{self, BufRead, Write},
@@ -40,12 +42,9 @@ pub(crate) fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
 }
 
 pub(crate) fn run_prompt() -> anyhow::Result<()> {
-    // NOTE: we don't hold a lock with `stderr` because language errors are reported
-    // through it with `Result`'s impl of `Termination`, which itself also writes to
-    // `stderr`.
     let mut stdout = io::stdout().lock();
     let mut stdin = io::stdin().lock();
-    let mut stderr = io::stderr();
+    let mut stderr = io::stderr().lock();
 
     let mut buf = String::new();
 
