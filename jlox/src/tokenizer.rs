@@ -1,54 +1,11 @@
 mod errors;
 mod location;
 mod scanner;
+mod token_type;
 
-use std::borrow::Cow;
+use std::{borrow::Cow, debug_assert_matches};
 
-pub(crate) use crate::tokenizer::{errors::*, location::Location};
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-#[repr(u8)]
-pub(crate) enum TokenType {
-    LeftParen,
-    RightParen,
-    LeftBrace,
-    RightBrace,
-    Comma,
-    Dot,
-    Minus,
-    Plus,
-    Semicolon,
-    Slash,
-    Star,
-    Bang,
-    BangEqual,
-    Equal,
-    EqualBang,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-    Ident,
-    String,
-    Num,
-    And,
-    Class,
-    Else,
-    False,
-    Fun,
-    For,
-    If,
-    Nil,
-    Or,
-    Print,
-    Return,
-    Super,
-    This,
-    True,
-    Var,
-    While,
-    Eof,
-}
+pub(crate) use crate::tokenizer::{errors::*, location::Location, token_type::TokenType};
 
 #[derive(Debug)]
 pub(crate) enum Lit {
@@ -68,4 +25,23 @@ pub(crate) struct Token {
     pub(crate) lex: Cow<'static, str>,
     pub(crate) lit: Option<Lit>,
     pub(crate) loc: Location,
+}
+
+impl Token {
+    pub(crate) fn new(bytes: &[u8], loc: Location) -> Self {
+        debug_assert_ne!(bytes.len(), 0);
+
+        if bytes.len() == 1 {
+            let byte = bytes.first().unwrap();
+
+            Self {
+                ty: TokenType::single_char(*byte),
+                lex: String::from(*byte as char).into(),
+                lit: None,
+                loc,
+            }
+        } else {
+            todo!()
+        }
+    }
 }

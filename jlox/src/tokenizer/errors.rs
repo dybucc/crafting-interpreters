@@ -1,6 +1,34 @@
-use std::error::Error;
+use std::{borrow::Cow, error::Error, fmt::Debug};
 
 use thiserror::Error;
+
+macro_rules! error_impl {
+    ($($t:ident),+) => {
+        $(
+            impl $crate::errors::ErrorTrace for $t {}
+            impl $crate::errors::ToError for $t {}
+        )+
+    };
+}
+
+#[derive(Debug, Error)]
+#[error(
+    "syntax error at: {line}:{col}{}",
+    if let Some(expect) = .expect {
+        expect.info()
+    } else {
+        "".into()
+    }
+)]
+pub(crate) struct SyntaxError {
+    pub(crate) line: usize,
+    pub(crate) col: usize,
+    pub(crate) expect: Option<Box<dyn ExpectInfo + Send + Sync>>,
+}
+
+pub(crate) trait ExpectInfo: Debug {
+    fn info(&self) -> Cow<'static, str>;
+}
 
 #[derive(Debug, Error)]
 #[error("unexpected eof before tokenization completed")]
@@ -20,13 +48,4 @@ pub(crate) struct InvalidUtf8 {
     pub(crate) col: usize,
 }
 
-macro_rules! error_impl {
-    ($($t:ident),+) => {
-        $(
-            impl $crate::errors::ErrorTrace for $t {}
-            impl $crate::errors::ToError for $t {}
-        )+
-    };
-}
-
-error_impl!(UnexpectedEof, IoBound, InvalidUtf8);
+error_impl!(UnexpectedEof, IoBound, InvalidUtf8, SyntaxError);

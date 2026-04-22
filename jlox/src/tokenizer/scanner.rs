@@ -1,13 +1,13 @@
-use std::io::{Cursor, Read, Seek};
+use std::io::{self, BufReader, Read};
 
 use crate::{
     Error, ToError,
-    tokenizer::{InvalidUtf8, IoBound, Location, Token, TokenType, UnexpectedEof},
+    tokenizer::{IoBound, Location, SyntaxError, Token},
 };
 
 #[derive(Debug)]
 pub(crate) struct Scanner<'a> {
-    pub(crate) cursor: Cursor<&'a [u8]>,
+    pub(crate) buf: BufReader<&'a [u8]>,
     pub(crate) line: usize,
     pub(crate) col: usize,
 }
@@ -15,65 +15,78 @@ pub(crate) struct Scanner<'a> {
 impl<'a> Scanner<'a> {
     pub(crate) fn new(buf: &'a [u8]) -> Self {
         Self {
-            cursor: Cursor::new(buf),
+            buf: BufReader::new(buf),
             col: 0,
             line: 0,
         }
     }
+}
 
-    fn scan(&mut self) -> Result<Vec<Token>, Error> {
+impl Scanner<'_> {
+    pub(crate) fn advance(&mut self, mut buf: [u8; 1]) -> Result<(), Error> {
         let Self {
-            cursor,
-            line: line_num,
-            col: col_num,
+            buf: source, line, ..
         } = self;
+
+        match source.read_exact(&mut buf) {
+            Err(err) if !matches!(err.kind(), io::ErrorKind::UnexpectedEof) => {
+                return Err(IoBound {
+                    inner: err.into(),
+                    line: *line,
+                }
+                .convert(None));
+            }
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn scan(&mut self) -> Result<Vec<Token>, Error> {
+        let Self {
+            buf: source,
+            line,
+            col,
+        } = self;
+
         let mut buf = [0; 1];
+        let mut out = Vec::new();
 
-        let mut out = Vec::with_capacity(cursor.stream_len().unwrap() as usize);
-
+        // NOTE: we don't care for panics here because it's all being read from an
+        // in-memory buffer so no I/O-bound operations are taking place.
         loop {
-            let mut line = {
-                let Some((line, _)) = cursor.get_ref().split_once(|byte| *byte == b'\n') else {
-                    break;
-                };
-
-                Cursor::new(line)
-            };
-            line.read_exact(&mut buf).map_err(|inner| {
-                IoBound {
-                    inner: inner.into(),
-                    line: *line_num,
+            match source.read_exact(&mut buf) {
+                Err(err) if matches!(err.kind(), io::ErrorKind::UnexpectedEof) => break,
+                Err(err) => {
+                    return Err(IoBound {
+                        inner: err.into(),
+                        line: *line,
+                    }
+                    .convert(None));
                 }
-                .convert(None)
-            })?;
+                Ok(()) => (),
+            }
+        }
 
-            match buf.as_slice() {
-                b"\n" => todo!(),
-                b"(" | b")" | b"{" | b"}" | b"," | b"." | b"-" | b"+" | b";" | b"*" => {
-                    let token = Token {
-                        ty: TokenType::LeftParen,
-                        lex: str::from_utf8(buf.clone())
-                            .to_owned()
-                            .map_err(|_| {
-                                InvalidUtf8 {
-                                    line: *line_num,
-                                    col: *col_num,
-                                }
-                                .convert(None)
-                            })?
-                            .into(),
-                        lit: None,
-                        loc: Location::new(*line_num, *col_num, 1),
-                    };
-
-                    *col_num += 1;
+        for byte in source.bytes().map(Result::unwrap) {
+            match byte {
+                b @ (b'(' | b')' | b'{' | b'}' | b',' | b'.' | b'-' | b'+' | b';' | b'*') => {
+                    out.push(Token::new(&[b], Location::new(*line, *col, 1)));
+                    *col += 1;
                 }
-                b"/" => todo!(),
-                b"!" => todo!(),
-                b"=" => todo!(),
-                b">" => todo!(),
-                b"<" => todo!(),
-                _ => return Err(UnexpectedEof.convert(None)),
+                b @ b'/' => {}
+                b'!' => todo!(),
+                b'=' => todo!(),
+                b'>' => todo!(),
+                b'<' => todo!(),
+                _ => {
+                    return Err(SyntaxError {
+                        line: *line,
+                        col: *col,
+                        expect: None,
+                    }
+                    .convert(None));
+                }
             }
         }
 

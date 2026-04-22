@@ -1,5 +1,3 @@
-#![feature(seek_stream_len, slice_split_once)]
-
 use std::{
     fs,
     io::{self, BufRead, Write},
@@ -23,7 +21,7 @@ extern crate self as jlox;
     not(test),
     expect(
         clippy::wildcard_imports,
-        reason = "Errors are meant to be wildard-imported."
+        reason = "In this project, errors are meant to be wildard-imported."
     )
 )]
 pub(crate) use jlox::errors::*;
