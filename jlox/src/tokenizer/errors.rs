@@ -2,8 +2,10 @@ use std::{borrow::Cow, error::Error, fmt::Debug};
 
 use thiserror::Error;
 
-macro_rules! error_impl {
-    ($($t:ident),+) => {
+use crate::tokenizer::Location;
+
+macro_rules! error_trace_impl {
+    ($($t:ident),+ $(,)?) => {
         $(
             impl $crate::errors::ErrorTrace for $t {}
             impl $crate::errors::ToError for $t {}
@@ -12,26 +14,15 @@ macro_rules! error_impl {
 }
 
 #[derive(Debug, Error)]
-#[error(
-    "syntax error at: {line}:{col}{}",
-    if let Some(expect) = .expect {
-        expect.info()
-    } else {
-        "".into()
-    }
-)]
+#[error("pending")]
 pub(crate) struct SyntaxError {
-    pub(crate) line: usize,
-    pub(crate) col: usize,
-    pub(crate) expect: Option<Box<dyn ExpectInfo + Send + Sync>>,
+    pub(crate) repr: SyntaxErrorContainer,
 }
 
-pub(crate) trait ExpectInfo: Debug {
-    fn info(&self) -> Cow<'static, str>;
-}
+pub(crate) type SyntaxErrorContainer = Vec<Location>;
 
 #[derive(Debug, Error)]
-#[error("unexpected eof before tokenization completed")]
+#[error("unexpected eof before end of tokenization")]
 pub(crate) struct UnexpectedEof;
 
 #[derive(Debug, Error)]
@@ -48,4 +39,4 @@ pub(crate) struct InvalidUtf8 {
     pub(crate) col: usize,
 }
 
-error_impl!(UnexpectedEof, IoBound, InvalidUtf8, SyntaxError);
+error_trace_impl!(UnexpectedEof, IoBound, InvalidUtf8, SyntaxError);

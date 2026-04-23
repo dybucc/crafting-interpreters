@@ -3,7 +3,7 @@ mod location;
 mod scanner;
 mod token_type;
 
-use std::{borrow::Cow, debug_assert_matches};
+use std::borrow::Cow;
 
 pub(crate) use crate::tokenizer::{errors::*, location::Location, token_type::TokenType};
 

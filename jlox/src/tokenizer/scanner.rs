@@ -1,13 +1,16 @@
-use std::io::{self, BufReader, Read};
+use std::{
+    io::{self, BufReader, Cursor, Read},
+    ops::Not,
+};
 
 use crate::{
     Error, ToError,
-    tokenizer::{IoBound, Location, SyntaxError, Token},
+    tokenizer::{IoBound, Location, SyntaxError, SyntaxErrorContainer, Token},
 };
 
 #[derive(Debug)]
 pub(crate) struct Scanner<'a> {
-    pub(crate) buf: BufReader<&'a [u8]>,
+    pub(crate) buf: BufReader<Cursor<&'a [u8]>>,
     pub(crate) line: usize,
     pub(crate) col: usize,
 }
@@ -15,7 +18,7 @@ pub(crate) struct Scanner<'a> {
 impl<'a> Scanner<'a> {
     pub(crate) fn new(buf: &'a [u8]) -> Self {
         Self {
-            buf: BufReader::new(buf),
+            buf: BufReader::new(Cursor::new(buf)),
             col: 0,
             line: 0,
         }
@@ -28,66 +31,62 @@ impl Scanner<'_> {
             buf: source, line, ..
         } = self;
 
-        match source.read_exact(&mut buf) {
-            Err(err) if !matches!(err.kind(), io::ErrorKind::UnexpectedEof) => {
-                return Err(IoBound {
-                    inner: err.into(),
-                    line: *line,
-                }
-                .convert(None));
+        if let Err(err) = source.read_exact(&mut buf)
+            && matches!(err.kind(), io::ErrorKind::UnexpectedEof).not()
+        {
+            return Err(IoBound {
+                inner: err.into(),
+                line: *line,
             }
-            _ => (),
+            .convert(None));
         }
 
         Ok(())
     }
 
+    #[expect(unused, reason = "WIP.")]
     pub(crate) fn scan(&mut self) -> Result<Vec<Token>, Error> {
-        let Self {
-            buf: source,
-            line,
-            col,
-        } = self;
-
         let mut buf = [0; 1];
         let mut out = Vec::new();
+        let mut errors = Vec::new();
 
         // NOTE: we don't care for panics here because it's all being read from an
         // in-memory buffer so no I/O-bound operations are taking place.
         loop {
-            match source.read_exact(&mut buf) {
-                Err(err) if matches!(err.kind(), io::ErrorKind::UnexpectedEof) => break,
-                Err(err) => {
-                    return Err(IoBound {
-                        inner: err.into(),
-                        line: *line,
-                    }
-                    .convert(None));
-                }
-                Ok(()) => (),
-            }
-        }
+            self.advance(buf)?;
 
-        for byte in source.bytes().map(Result::unwrap) {
-            match byte {
-                b @ (b'(' | b')' | b'{' | b'}' | b',' | b'.' | b'-' | b'+' | b';' | b'*') => {
-                    out.push(Token::new(&[b], Location::new(*line, *col, 1)));
-                    *col += 1;
+            match &buf {
+                b @ (b"(" | b")" | b"{" | b"}" | b"," | b"." | b"-" | b"+" | b";" | b"*") => {
+                    out.push(Token::new(b, Location::new(self.line, self.col, 1)));
+                    self.col += 1;
                 }
-                b @ b'/' => {}
-                b'!' => todo!(),
-                b'=' => todo!(),
-                b'>' => todo!(),
-                b'<' => todo!(),
+                b"/" => todo!(),
+                b"!" => todo!(),
+                b"=" => todo!(),
+                b">" => todo!(),
+                b"<" => todo!(),
                 _ => {
-                    return Err(SyntaxError {
-                        line: *line,
-                        col: *col,
-                        expect: None,
+                    if errors.is_empty().not() {
+                        let SyntaxError { repr } = errors.pop().unwrap();
+                        // TODO: converge errors into one if their spans are
+                        // similar. Repeat in a loop, extracting the last one
+                        // from errors until noone remain or the spans don't
+                        // overlap.
+                    } else {
+                        errors.push(SyntaxError {
+                            repr: {
+                                vec![Location {
+                                    line: self.line,
+                                    col: self.col,
+                                    len: 1,
+                                }]
+                            },
+                        });
                     }
-                    .convert(None));
                 }
             }
+
+            break;
         }
 
         Ok(out)
