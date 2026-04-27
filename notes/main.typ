@@ -72,3 +72,15 @@ Barring the fact that the standard library is non-existent, there should at leas
 low-level interaction with the system such that language users could build abstractions over OS
 primitives. This should go through performing interop with C, though this likely also implies that
 there ought be some interface to other languages, even if it's indirect through C.
+
+= Implementation notes
+
+Coalescing of errors can be implemented as either one of an append operation on two vectors holding
+error locations, or by using a single location syntax error type that extends the length of the
+underlying location type whenever an error coalesces into it. One leverages ease of use at the error
+generation level, while the other makes error reporting simpler by having the type used to report be
+immediately ready at call site. Considering coalescing ought happen ideally at line feeds, there
+ought be some leverage for the collection of errors to be gathered prior to appending those with
+similar spans. This could be made more ergonomic if all the errors in the line were to be reported
+at once, while also converging those at a single byte distance from each other (with respect to the
+underlying span tracker.)

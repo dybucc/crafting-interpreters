@@ -1,9 +1,9 @@
+use std::borrow::Cow;
+
 mod errors;
 mod location;
 mod scanner;
 mod token_type;
-
-use std::borrow::Cow;
 
 pub(crate) use crate::tokenizer::{errors::*, location::Location, token_type::TokenType};
 
@@ -31,17 +31,24 @@ impl Token {
     pub(crate) fn new(bytes: &[u8], loc: Location) -> Self {
         debug_assert_ne!(bytes.len(), 0);
 
-        if bytes.len() == 1 {
-            let byte = bytes.first().unwrap();
+        match bytes.len() {
+            1 => {
+                let byte = bytes.first().unwrap();
 
-            Self {
-                ty: TokenType::single_char(*byte),
-                lex: String::from(*byte as char).into(),
+                Self {
+                    ty: TokenType::single_char(*byte),
+                    lex: String::from(*byte as char).into(),
+                    lit: None,
+                    loc,
+                }
+            }
+            2 => Self {
+                ty: TokenType::two_chars(bytes),
+                lex: String::from_utf8_lossy_owned(bytes.to_owned()).into(),
                 lit: None,
                 loc,
-            }
-        } else {
-            todo!()
+            },
+            _ => todo!(),
         }
     }
 }

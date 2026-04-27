@@ -17,7 +17,7 @@ pub(crate) enum TokenType {
     Bang,
     BangEqual,
     Equal,
-    EqualBang,
+    EqualEqual,
     Greater,
     GreaterEqual,
     Less,
@@ -45,6 +45,16 @@ pub(crate) enum TokenType {
 }
 
 impl TokenType {
+    pub(crate) fn two_chars(bytes: &[u8]) -> Self {
+        match bytes {
+            b"!=" => TokenType::BangEqual,
+            b"==" => TokenType::EqualEqual,
+            b">=" => TokenType::GreaterEqual,
+            b"<=" => TokenType::LessEqual,
+            _ => unreachable!(),
+        }
+    }
+
     pub(crate) fn single_char(byte: u8) -> Self {
         debug_assert_matches!(
             byte,
@@ -62,6 +72,10 @@ impl TokenType {
             b'+' => TokenType::Plus,
             b';' => TokenType::Semicolon,
             b'*' => TokenType::Star,
+            b'!' => TokenType::Bang,
+            b'=' => TokenType::Equal,
+            b'>' => TokenType::Greater,
+            b'<' => TokenType::Less,
             _ => unreachable!(),
         }
     }

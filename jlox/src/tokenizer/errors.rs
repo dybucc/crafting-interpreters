@@ -1,8 +1,10 @@
-use std::{borrow::Cow, error::Error, fmt::Debug};
+use std::{error::Error, fmt::Debug};
 
 use thiserror::Error;
 
-use crate::tokenizer::Location;
+mod syntax_error;
+
+pub(crate) use crate::tokenizer::errors::syntax_error::SyntaxError;
 
 macro_rules! error_trace_impl {
     ($($t:ident),+ $(,)?) => {
@@ -12,14 +14,6 @@ macro_rules! error_trace_impl {
         )+
     };
 }
-
-#[derive(Debug, Error)]
-#[error("pending")]
-pub(crate) struct SyntaxError {
-    pub(crate) repr: SyntaxErrorContainer,
-}
-
-pub(crate) type SyntaxErrorContainer = Vec<Location>;
 
 #[derive(Debug, Error)]
 #[error("unexpected eof before end of tokenization")]

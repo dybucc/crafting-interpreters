@@ -1,3 +1,5 @@
+#![feature(bufreader_peek, string_from_utf8_lossy_owned)]
+
 use std::{
     fs,
     io::{self, BufRead, Write},

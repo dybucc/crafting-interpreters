@@ -1,11 +1,8 @@
-use std::{
-    io::{self, BufReader, Cursor, Read},
-    ops::Not,
-};
+use std::io::{self, BufReader, Cursor, Read};
 
 use crate::{
     Error, ToError,
-    tokenizer::{IoBound, Location, SyntaxError, SyntaxErrorContainer, Token},
+    tokenizer::{IoBound, Location, SyntaxError, Token},
 };
 
 #[derive(Debug)]
@@ -26,14 +23,15 @@ impl<'a> Scanner<'a> {
 }
 
 impl Scanner<'_> {
-    pub(crate) fn advance(&mut self, mut buf: [u8; 1]) -> Result<(), Error> {
+    pub(crate) fn advance(&mut self, buf: &mut [u8; 1]) -> Result<bool, Error> {
         let Self {
             buf: source, line, ..
         } = self;
 
-        if let Err(err) = source.read_exact(&mut buf)
-            && matches!(err.kind(), io::ErrorKind::UnexpectedEof).not()
-        {
+        if let Err(err) = source.read_exact(buf) {
+            if matches!(err.kind(), io::ErrorKind::UnexpectedEof) {
+                return Ok(true);
+            }
             return Err(IoBound {
                 inner: err.into(),
                 line: *line,
@@ -41,7 +39,16 @@ impl Scanner<'_> {
             .convert(None));
         }
 
-        Ok(())
+        Ok(false)
+    }
+
+    pub(crate) fn peek(&mut self, bytes: &[u8]) -> Result<bool, Error> {
+        let Self { buf, line, .. } = self;
+
+        buf.peek(1)
+            .map(|peeker| bytes == peeker)
+            .map_err(Into::into)
+            .map_err(|inner| IoBound { inner, line: *line }.convert(None))
     }
 
     #[expect(unused, reason = "WIP.")]
@@ -50,43 +57,53 @@ impl Scanner<'_> {
         let mut out = Vec::new();
         let mut errors = Vec::new();
 
-        // NOTE: we don't care for panics here because it's all being read from an
-        // in-memory buffer so no I/O-bound operations are taking place.
-        loop {
-            self.advance(buf)?;
+        macro_rules! insert {
+            ($bytes:expr, $len:expr) => {{
+                out.push(Token::new($bytes, Location::new(self.line, self.col, $len)));
+                self.col += 1;
+            }};
+        }
 
-            match &buf {
-                b @ (b"(" | b")" | b"{" | b"}" | b"," | b"." | b"-" | b"+" | b";" | b"*") => {
-                    out.push(Token::new(b, Location::new(self.line, self.col, 1)));
-                    self.col += 1;
+        // NOTE: we don't care for errors that are not syntax errors here so we just
+        // propagate them up the stack.
+        while self.advance(&mut buf)? {
+            match buf[0] {
+                b @ (b'(' | b')' | b'{' | b'}' | b',' | b'.' | b'-' | b'+' | b';' | b'*') => {
+                    insert!(&[b], 1);
                 }
-                b"/" => todo!(),
-                b"!" => todo!(),
-                b"=" => todo!(),
-                b">" => todo!(),
-                b"<" => todo!(),
-                _ => {
-                    if errors.is_empty().not() {
-                        let SyntaxError { repr } = errors.pop().unwrap();
-                        // TODO: converge errors into one if their spans are
-                        // similar. Repeat in a loop, extracting the last one
-                        // from errors until noone remain or the spans don't
-                        // overlap.
-                    } else {
-                        errors.push(SyntaxError {
-                            repr: {
-                                vec![Location {
-                                    line: self.line,
-                                    col: self.col,
-                                    len: 1,
-                                }]
-                            },
-                        });
+                b @ b'/' if self.peek(b"/")? => loop {
+                    self.advance(&mut buf)?;
+
+                    if &buf == b"\n" {
+                        self.line += 1;
+                        self.col = 0;
+
+                        break;
                     }
-                }
-            }
+                },
+                b @ (b'!' | b'=' | b'<' | b'>') if self.peek(b"=")? => {
+                    let mut coalesced_symbol = vec![b];
 
-            break;
+                    self.advance(&mut buf)?;
+                    coalesced_symbol.push(buf[0]);
+
+                    insert!(&coalesced_symbol, 2);
+                }
+                b @ (b'!' | b'=' | b'>' | b'<') => insert!(&[b], 1),
+                b'\n' => {
+                    self.line += 1;
+                    self.col = 0;
+                }
+                // NOTE: we require special treatment of line feeds to update internal counters, so
+                // if there's an ascii whitespace match beyond that, we can be sure it's not a line
+                // feed and can thus be safely ignored.
+                b if b.is_ascii_whitespace() => (),
+                _ => errors.push(SyntaxError::new(Location {
+                    line: self.line,
+                    col: self.col,
+                    len: 1,
+                })),
+            }
         }
 
         Ok(out)
