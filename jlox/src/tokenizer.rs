@@ -1,17 +1,14 @@
 use std::borrow::Cow;
 
 mod errors;
+mod literal;
 mod location;
 mod scanner;
 mod token_type;
 
-pub(crate) use crate::tokenizer::{errors::*, location::Location, token_type::TokenType};
-
-#[derive(Debug)]
-pub(crate) enum Lit {
-    Str(Cow<'static, str>),
-    Num(Num),
-}
+pub(crate) use jlox::tokenizer::{
+    errors::*, literal::Lit, location::Location, token_type::TokenType,
+};
 
 #[derive(Debug)]
 pub(crate) enum Num {
@@ -28,7 +25,7 @@ pub(crate) struct Token {
 }
 
 impl Token {
-    pub(crate) fn new(bytes: &[u8], loc: Location) -> Self {
+    pub(crate) fn new(bytes: &[u8], hint: Option<TokenType>, loc: Location) -> Self {
         debug_assert_ne!(bytes.len(), 0);
 
         match bytes.len() {
@@ -48,7 +45,17 @@ impl Token {
                 lit: None,
                 loc,
             },
-            _ => todo!(),
+            _ if let Some(hint @ TokenType::String) = hint => Self {
+                ty: hint,
+                lex: String::from_utf8_lossy_owned(bytes.to_owned()).into(),
+                lit: Some(
+                    String::from_utf8_lossy_owned(bytes.to_owned())
+                        .parse()
+                        .unwrap(),
+                ),
+                loc,
+            },
+            _ => unimplemented!(),
         }
     }
 }

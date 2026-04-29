@@ -1,8 +1,11 @@
-use std::io::{self, BufReader, Cursor, Read};
+use std::{
+    io::{self, BufReader, Cursor, Read},
+    ops::Not,
+};
 
 use crate::{
     Error, ToError,
-    tokenizer::{IoBound, Location, SyntaxError, Token},
+    tokenizer::{IoBound, Location, SyntaxError, Token, TokenType},
 };
 
 #[derive(Debug)]
@@ -32,6 +35,7 @@ impl Scanner<'_> {
             if matches!(err.kind(), io::ErrorKind::UnexpectedEof) {
                 return Ok(true);
             }
+
             return Err(IoBound {
                 inner: err.into(),
                 line: *line,
@@ -57,9 +61,29 @@ impl Scanner<'_> {
         let mut out = Vec::new();
         let mut errors = Vec::new();
 
-        macro_rules! insert {
+        // NOTE: this buffer we use when parsing multi-byte tokens, like those of the
+        // two-byte variants of the bang symbol, or just strings. Because this only gets
+        // used alongside tokens of length greater than 1, we construct it with at least
+        // two elements.
+        let mut running_buf = Vec::with_capacity(2);
+
+        macro_rules! insert_token {
             ($bytes:expr, $len:expr) => {{
-                out.push(Token::new($bytes, Location::new(self.line, self.col, $len)));
+                out.push(Token::new(
+                    $bytes,
+                    None,
+                    Location::new(self.line, self.col, $len),
+                ));
+
+                self.col += 1;
+            }};
+            ($bytes:expr, $hint:expr, $len:expr) => {{
+                out.push(Token::new(
+                    $bytes,
+                    $hint.into(),
+                    Location::new(self.line, self.col, $len),
+                ));
+
                 self.col += 1;
             }};
         }
@@ -68,11 +92,34 @@ impl Scanner<'_> {
         // propagate them up the stack.
         while self.advance(&mut buf)? {
             match buf[0] {
+                b @ b'"' => {
+                    running_buf.clear();
+
+                    loop {
+                        if self.advance(&mut buf)?.not() {
+                            errors.push(SyntaxError {
+                                span: Location::new(self.line, self.col, running_buf.len()),
+                            });
+
+                            break;
+                        }
+
+                        if b == b'"' {
+                            break;
+                        }
+
+                        running_buf.push(buf[0]);
+                    }
+
+                    insert_token!(&running_buf, TokenType::String, running_buf.len());
+                }
                 b @ (b'(' | b')' | b'{' | b'}' | b',' | b'.' | b'-' | b'+' | b';' | b'*') => {
-                    insert!(&[b], 1);
+                    insert_token!(&[b], 1);
                 }
                 b @ b'/' if self.peek(b"/")? => loop {
-                    self.advance(&mut buf)?;
+                    if self.advance(&mut buf)?.not() {
+                        break;
+                    }
 
                     if &buf == b"\n" {
                         self.line += 1;
@@ -82,15 +129,33 @@ impl Scanner<'_> {
                     }
                 },
                 b @ (b'!' | b'=' | b'<' | b'>') if self.peek(b"=")? => {
-                    let mut coalesced_symbol = vec![b];
+                    running_buf.clear();
+                    running_buf.push(b);
 
                     self.advance(&mut buf)?;
-                    coalesced_symbol.push(buf[0]);
+                    running_buf.push(buf[0]);
 
-                    insert!(&coalesced_symbol, 2);
+                    insert_token!(&running_buf, 2);
                 }
-                b @ (b'!' | b'=' | b'>' | b'<') => insert!(&[b], 1),
+                b @ (b'!' | b'=' | b'>' | b'<') => insert_token!(&[b], 1),
                 b'\n' => {
+                    // NOTE: at the end of each line we parse, errors (within the same line) that
+                    // happen within one byte offset of each other are merge into a single error.
+                    while errors.len() > 1 {
+                        let last_err: SyntaxError = errors.pop().unwrap();
+                        let before_last = errors.last_mut().unwrap();
+
+                        if before_last.same_line(&last_err) {
+                            if before_last.akin_spans(&last_err) {
+                                before_last.merge(&last_err);
+                            }
+                        } else {
+                            errors.push(last_err);
+
+                            break;
+                        }
+                    }
+
                     self.line += 1;
                     self.col = 0;
                 }

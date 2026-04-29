@@ -4,7 +4,9 @@ use thiserror::Error;
 
 mod syntax_error;
 
-pub(crate) use crate::tokenizer::errors::syntax_error::SyntaxError;
+pub(crate) use crate::tokenizer::errors::syntax_error::{
+    InvalidUtf8, Other, SyntaxError, UnexpectedEof,
+};
 
 macro_rules! error_trace_impl {
     ($($t:ident),+ $(,)?) => {
@@ -16,21 +18,16 @@ macro_rules! error_trace_impl {
 }
 
 #[derive(Debug, Error)]
-#[error("unexpected eof before end of tokenization")]
-pub(crate) struct UnexpectedEof;
-
-#[derive(Debug, Error)]
 #[error("io error while reading line {line}: {inner}")]
 pub(crate) struct IoBound {
     pub(crate) inner: Box<dyn Error + Send + Sync>,
     pub(crate) line: usize,
 }
 
-#[derive(Debug, Error)]
-#[error("found invalid utf-8 at: {line}:{col}")]
-pub(crate) struct InvalidUtf8 {
-    pub(crate) line: usize,
-    pub(crate) col: usize,
+error_trace_impl! {
+    UnexpectedEof,
+    IoBound,
+    InvalidUtf8,
+    SyntaxError,
+    Other
 }
-
-error_trace_impl!(UnexpectedEof, IoBound, InvalidUtf8, SyntaxError);

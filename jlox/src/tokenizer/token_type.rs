@@ -12,6 +12,11 @@ pub(crate) enum TokenType {
     Minus,
     Plus,
     Semicolon,
+    #[expect(
+        unused,
+        reason = "Currently, comments are the only ones implemented, but soon enough number \
+                  literals and associated operations will be as well."
+    )]
     Slash,
     Star,
     Bang,
@@ -58,7 +63,19 @@ impl TokenType {
     pub(crate) fn single_char(byte: u8) -> Self {
         debug_assert_matches!(
             byte,
-            b'(' | b')' | b'{' | b'}' | b',' | b'.' | b'-' | b'+' | b';' | b'*'
+            b'(' | b')'
+                | b'{'
+                | b'}'
+                | b','
+                | b'.'
+                | b'-'
+                | b'+'
+                | b';'
+                | b'*'
+                | b'!'
+                | b'='
+                | b'>'
+                | b'<'
         );
 
         match byte {
