@@ -10,14 +10,12 @@ use std::{
 use clap::Parser;
 
 mod args;
-mod errors;
+mod error_rt;
 #[macro_use]
 mod macros;
 mod runtime;
 mod support;
 mod tokenizer;
-
-extern crate self as jlox;
 
 #[cfg_attr(
     not(test),
@@ -26,8 +24,8 @@ extern crate self as jlox;
         reason = "In this project, errors are meant to be wildard-imported."
     )
 )]
-pub(crate) use jlox::errors::*;
-pub(crate) use jlox::{args::Args, runtime::run};
+pub(crate) use crate::error_rt::*;
+pub(crate) use crate::{args::Args, runtime::run};
 
 fn main() -> anyhow::Result<()> {
     if let Args { script: Some(file) } = Args::parse() {
@@ -61,7 +59,7 @@ pub(crate) fn run_prompt() -> anyhow::Result<()> {
         }
 
         if let Err(err) = run(buf.trim_ascii_end(), &mut stdout) {
-            match err.downcast::<jlox::Error>() {
+            match err.downcast::<crate::Error>() {
                 Ok(lang_err) => {
                     writef!(stderr)?;
                     lang_err.into_result().report();

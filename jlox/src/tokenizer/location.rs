@@ -49,17 +49,16 @@ impl Location {
         false
     }
 
-    // NOTE: if the `Location` type is used in errors other than `SyntaxError`,
-    // recall this function does not consider the spans' lines, as it assumes
-    // they are both within the same line.
     #[inline]
     pub(crate) fn merge_cols(&mut self, other: Self) {
-        let Location { len, col, .. } = self;
+        let Location { len, col, line } = self;
         let Location {
             len: olen,
             col: mut ocol,
-            ..
+            line: oline,
         } = other;
+
+        debug_assert_eq!(*line, oline);
 
         match col.cmp(&&mut ocol) {
             Ordering::Less => *len = ocol - *col + olen,

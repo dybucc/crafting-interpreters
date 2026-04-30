@@ -6,7 +6,7 @@ mod location;
 mod scanner;
 mod token_type;
 
-pub(crate) use jlox::tokenizer::{
+pub(crate) use crate::tokenizer::{
     errors::*, literal::Lit, location::Location, token_type::TokenType,
 };
 
@@ -40,21 +40,21 @@ impl Token {
                 }
             }
             2 => Self {
-                ty: TokenType::two_chars(bytes),
+                ty: TokenType::compound(bytes),
                 lex: String::from_utf8_lossy_owned(bytes.to_owned()).into(),
                 lit: None,
                 loc,
             },
-            _ if let Some(hint @ TokenType::String) = hint => Self {
-                ty: hint,
-                lex: String::from_utf8_lossy_owned(bytes.to_owned()).into(),
-                lit: Some(
-                    String::from_utf8_lossy_owned(bytes.to_owned())
-                        .parse()
-                        .unwrap(),
-                ),
-                loc,
-            },
+            _ if let Some(hint @ TokenType::String) = hint => {
+                let lex = String::from_utf8_lossy_owned(bytes.to_owned());
+
+                Self {
+                    ty: hint,
+                    lit: Some(lex.parse().unwrap()),
+                    lex: lex.into(),
+                    loc,
+                }
+            }
             _ => unimplemented!(),
         }
     }

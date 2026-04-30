@@ -4,9 +4,14 @@ use std::{
 };
 
 use crate::{
-    Error, ToError,
-    tokenizer::{IoBound, Location, SyntaxError, Token, TokenType},
+    Error, ErrorTrace, ToError,
+    tokenizer::{
+        IoBound, Location, MalformedNumber, SyntaxError, Token, TokenType, UnexpectedEof,
+        scanner::peeker_pattern::PeekerPattern,
+    },
 };
+
+mod peeker_pattern;
 
 #[derive(Debug)]
 pub(crate) struct Scanner<'a> {
@@ -33,7 +38,7 @@ impl Scanner<'_> {
 
         if let Err(err) = source.read_exact(buf) {
             if matches!(err.kind(), io::ErrorKind::UnexpectedEof) {
-                return Ok(true);
+                return Ok(false);
             }
 
             return Err(IoBound {
@@ -43,14 +48,16 @@ impl Scanner<'_> {
             .convert(None));
         }
 
-        Ok(false)
+        Ok(true)
     }
 
-    pub(crate) fn peek(&mut self, bytes: &[u8]) -> Result<bool, Error> {
+    // TODO: handle reaching EOF, as that should be reported with a non-error
+    // variant in the same fashion as with `advance()`.
+    pub(crate) fn peek(&mut self, mut pat: impl PeekerPattern) -> Result<bool, Error> {
         let Self { buf, line, .. } = self;
 
         buf.peek(1)
-            .map(|peeker| bytes == peeker)
+            .map(pat.eval())
             .map_err(Into::into)
             .map_err(|inner| IoBound { inner, line: *line }.convert(None))
     }
@@ -61,13 +68,13 @@ impl Scanner<'_> {
         let mut out = Vec::new();
         let mut errors = Vec::new();
 
-        // NOTE: this buffer we use when parsing multi-byte tokens, like those of the
-        // two-byte variants of the bang symbol, or just strings. Because this only gets
-        // used alongside tokens of length greater than 1, we construct it with at least
-        // two elements.
+        // NOTE: this buffer we use when parsing multi-byte tokens, which is to say all
+        // tokens other than single byte operators. Because this only gets used
+        // alongside tokens of length greater than 1, we construct it with at least two
+        // elements.
         let mut running_buf = Vec::with_capacity(2);
 
-        macro_rules! insert_token {
+        macro_rules! new_token {
             ($bytes:expr, $len:expr) => {{
                 out.push(Token::new(
                     $bytes,
@@ -92,14 +99,39 @@ impl Scanner<'_> {
         // propagate them up the stack.
         while self.advance(&mut buf)? {
             match buf[0] {
+                b if b.is_ascii_digit() => {
+                    running_buf.clear();
+                    running_buf.push(b);
+
+                    let mut in_float = false;
+
+                    loop {
+                        if self.peek(b".")? {
+                            if in_float.not() {
+                                in_float = true;
+                            } else {
+                                errors.push(SyntaxError::new(
+                                    Location::new(self.line, self.col, running_buf.len()),
+                                    Box::new(MalformedNumber) as Box<dyn ErrorTrace>,
+                                ));
+
+                                break;
+                            }
+                        }
+
+                        if self.peek(|bytes: &[u8]| bytes.first().unwrap().is_ascii_whitespace())? {
+                        }
+                    }
+                }
                 b @ b'"' => {
                     running_buf.clear();
 
                     loop {
                         if self.advance(&mut buf)?.not() {
-                            errors.push(SyntaxError {
-                                span: Location::new(self.line, self.col, running_buf.len()),
-                            });
+                            errors.push(SyntaxError::new(
+                                Location::new(self.line, self.col, running_buf.len()),
+                                Box::new(UnexpectedEof) as Box<dyn ErrorTrace>,
+                            ));
 
                             break;
                         }
@@ -111,12 +143,18 @@ impl Scanner<'_> {
                         running_buf.push(buf[0]);
                     }
 
-                    insert_token!(&running_buf, TokenType::String, running_buf.len());
+                    // NOTE: the hint we provide to the token generator makes it so that the string
+                    // need not be utf-8, as whatever bytes are not will be filled in with the
+                    // replacement character.
+                    new_token!(&running_buf, TokenType::String, running_buf.len());
                 }
                 b @ (b'(' | b')' | b'{' | b'}' | b',' | b'.' | b'-' | b'+' | b';' | b'*') => {
-                    insert_token!(&[b], 1);
+                    new_token!(&[b], 1);
                 }
                 b @ b'/' if self.peek(b"/")? => loop {
+                    // NOTE: supporting single-line comments does not require checking if EOF has
+                    // been hit, as reaching it does not cause parsing issues with respecto the rest
+                    // of the grammar.
                     if self.advance(&mut buf)?.not() {
                         break;
                     }
@@ -135,12 +173,12 @@ impl Scanner<'_> {
                     self.advance(&mut buf)?;
                     running_buf.push(buf[0]);
 
-                    insert_token!(&running_buf, 2);
+                    new_token!(&running_buf, 2);
                 }
-                b @ (b'!' | b'=' | b'>' | b'<') => insert_token!(&[b], 1),
+                b @ (b'!' | b'=' | b'>' | b'<') => new_token!(&[b], 1),
                 b'\n' => {
                     // NOTE: at the end of each line we parse, errors (within the same line) that
-                    // happen within one byte offset of each other are merge into a single error.
+                    // happen within one byte offset of each other are merged into a single error.
                     while errors.len() > 1 {
                         let last_err: SyntaxError = errors.pop().unwrap();
                         let before_last = errors.last_mut().unwrap();
@@ -163,7 +201,7 @@ impl Scanner<'_> {
                 // if there's an ascii whitespace match beyond that, we can be sure it's not a line
                 // feed and can thus be safely ignored.
                 b if b.is_ascii_whitespace() => (),
-                _ => errors.push(SyntaxError::new(Location {
+                _ => errors.push(SyntaxError::new_generic(Location {
                     line: self.line,
                     col: self.col,
                     len: 1,

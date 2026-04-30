@@ -1,6 +1,6 @@
 use std::{borrow::Cow, convert::Infallible, str::FromStr};
 
-use jlox::tokenizer::Num;
+use crate::tokenizer::Num;
 
 #[derive(Debug)]
 pub(crate) enum Lit {

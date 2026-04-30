@@ -50,7 +50,7 @@ pub(crate) enum TokenType {
 }
 
 impl TokenType {
-    pub(crate) fn two_chars(bytes: &[u8]) -> Self {
+    pub(crate) fn compound(bytes: &[u8]) -> Self {
         match bytes {
             b"!=" => TokenType::BangEqual,
             b"==" => TokenType::EqualEqual,
@@ -61,23 +61,6 @@ impl TokenType {
     }
 
     pub(crate) fn single_char(byte: u8) -> Self {
-        debug_assert_matches!(
-            byte,
-            b'(' | b')'
-                | b'{'
-                | b'}'
-                | b','
-                | b'.'
-                | b'-'
-                | b'+'
-                | b';'
-                | b'*'
-                | b'!'
-                | b'='
-                | b'>'
-                | b'<'
-        );
-
         match byte {
             b'(' => TokenType::LeftParen,
             b')' => TokenType::RightParen,
