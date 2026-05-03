@@ -57,6 +57,7 @@ impl Scanner<'_> {
         let Self { buf, line, .. } = self;
 
         buf.peek(1)
+            .map(slice::first)
             .map(pat.eval())
             .map_err(Into::into)
             .map_err(|inner| IoBound { inner, line: *line }.convert(None))

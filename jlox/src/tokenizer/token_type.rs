@@ -1,5 +1,3 @@
-use std::debug_assert_matches;
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 #[repr(u8)]
 pub(crate) enum TokenType {
@@ -12,11 +10,6 @@ pub(crate) enum TokenType {
     Minus,
     Plus,
     Semicolon,
-    #[expect(
-        unused,
-        reason = "Currently, comments are the only ones implemented, but soon enough number \
-                  literals and associated operations will be as well."
-    )]
     Slash,
     Star,
     Bang,
@@ -60,7 +53,7 @@ impl TokenType {
         }
     }
 
-    pub(crate) fn single_char(byte: u8) -> Self {
+    pub(crate) fn single(byte: u8) -> Self {
         match byte {
             b'(' => TokenType::LeftParen,
             b')' => TokenType::RightParen,

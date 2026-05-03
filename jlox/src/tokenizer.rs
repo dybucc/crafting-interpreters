@@ -30,11 +30,11 @@ impl Token {
 
         match bytes.len() {
             1 => {
-                let byte = bytes.first().unwrap();
+                let byte = *bytes.first().unwrap();
 
                 Self {
-                    ty: TokenType::single_char(*byte),
-                    lex: String::from(*byte as char).into(),
+                    ty: TokenType::single(byte),
+                    lex: String::from(byte as char).into(),
                     lit: None,
                     loc,
                 }
@@ -45,11 +45,11 @@ impl Token {
                 lit: None,
                 loc,
             },
-            _ if let Some(hint @ TokenType::String) = hint => {
+            _ if let Some(ty @ TokenType::String) = hint => {
                 let lex = String::from_utf8_lossy_owned(bytes.to_owned());
 
                 Self {
-                    ty: hint,
+                    ty,
                     lit: Some(lex.parse().unwrap()),
                     lex: lex.into(),
                     loc,
