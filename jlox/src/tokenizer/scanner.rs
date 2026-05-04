@@ -53,6 +53,9 @@ impl Scanner<'_> {
 
     // TODO: handle reaching EOF, as that should be reported with a non-error
     // variant in the same fashion as with `advance()`.
+    // TODO: make `PeekerPattern` accept anything reasonable that can be compared
+    // with a single byte instead of with a slice of bytes, as the peeking operation
+    // only considers the byte coming immediately after it.
     pub(crate) fn peek(&mut self, mut pat: impl PeekerPattern) -> Result<bool, Error> {
         let Self { buf, line, .. } = self;
 
@@ -212,4 +215,16 @@ impl Scanner<'_> {
 
         Ok(out)
     }
+}
+
+pub(crate) fn digits(scanner: &mut Scanner, mut out_buf: impl AsMut<[u8]>) -> anyhow::Result<()> {
+    let out_buf = out_buf.as_mut();
+
+    let mut in_float = false;
+
+    loop {
+        todo!()
+    }
+
+    Ok(())
 }
