@@ -1,19 +1,33 @@
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    fmt::{self, Display},
+};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub(crate) struct Location {
-    pub(crate) line: usize,
-    pub(crate) col: usize,
-    pub(crate) len: usize,
+    line: usize,
+    col: usize,
+    len: usize,
+}
+
+// NOTE: we provide a default implementation for the `Location` type, though the
+// accessor methods we implement on  the type make it simple to overwrite this
+// with some other `Display`-like implementation. This can happen most often
+// when used inside errors for reporting the span of the underlying error
+// location.
+impl Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { line, col, .. } = self;
+
+        write!(f, "{line}:{col}")
+    }
 }
 
 impl Location {
-    #[inline]
     pub(crate) fn new(line: usize, col: usize, len: usize) -> Self {
         Self { line, col, len }
     }
 
-    #[inline]
     pub(crate) fn same_line(&self, other: &Self) -> bool {
         self.line == other.line
     }
@@ -49,7 +63,6 @@ impl Location {
         false
     }
 
-    #[inline]
     pub(crate) fn merge_cols(&mut self, other: Self) {
         let Location { len, col, line } = self;
         let Location {
@@ -68,5 +81,17 @@ impl Location {
             }
             Ordering::Equal => *len += olen,
         }
+    }
+
+    pub(crate) fn line(&self) -> usize {
+        self.line
+    }
+
+    pub(crate) fn col(&self) -> usize {
+        self.col
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.len
     }
 }

@@ -3,14 +3,13 @@ use thiserror::Error;
 use crate::{error_rt::ErrorTrace, tokenizer::Location};
 
 #[derive(Debug, Error)]
-#[error("{src}")]
+#[error("{span}: {src}")]
 pub(crate) struct SyntaxError {
     pub(crate) span: Location,
     pub(crate) src: Box<dyn ErrorTrace>,
 }
 
 impl SyntaxError {
-    #[inline]
     pub(crate) fn new(loc: Location, err: Box<dyn ErrorTrace>) -> Self {
         Self {
             span: loc,
@@ -18,15 +17,13 @@ impl SyntaxError {
         }
     }
 
-    #[inline]
-    pub(crate) fn new_generic(loc: Location) -> Self {
+    pub(crate) fn other(loc: Location) -> Self {
         Self {
             span: loc,
             src: Box::new(Other) as Box<dyn ErrorTrace>,
         }
     }
 
-    #[inline]
     pub(crate) fn same_line(&self, other: &Self) -> bool {
         let SyntaxError { span: src, .. } = self;
         let SyntaxError { span: other, .. } = other;
@@ -34,15 +31,13 @@ impl SyntaxError {
         src.same_line(other)
     }
 
-    #[inline]
     pub(crate) fn akin_spans(&self, other: &Self) -> bool {
         let SyntaxError { span: src, .. } = self;
         let SyntaxError { span: other, .. } = other;
 
-        src.akin_col(other)
+        src.same_line(other) && src.akin_col(other)
     }
 
-    #[inline]
     pub(crate) fn merge(&mut self, other: &Self) {
         let SyntaxError { span: src, .. } = self;
         let SyntaxError { span: other, .. } = other;
