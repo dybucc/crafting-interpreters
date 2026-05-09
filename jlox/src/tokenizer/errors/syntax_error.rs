@@ -52,7 +52,7 @@ impl SyntaxError {
 // representation of the error within `SyntaxError`.
 
 #[derive(Debug, Error)]
-#[error("malforemd number")]
+#[error("malformed number")]
 pub(crate) struct MalformedNumber;
 
 #[derive(Debug, Error)]

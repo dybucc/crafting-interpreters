@@ -11,8 +11,6 @@ use clap::Parser;
 
 mod args;
 mod error_rt;
-#[macro_use]
-mod macros;
 mod runtime;
 mod support;
 mod tokenizer;
@@ -28,18 +26,18 @@ pub(crate) use crate::error_rt::*;
 pub(crate) use crate::{args::Args, runtime::run};
 
 fn main() -> anyhow::Result<()> {
-    if let Args { script: Some(file) } = Args::parse() {
-        run_file(&file)
+    if let Some(file) = Args::parse().script() {
+        run_file(file)
     } else {
         run_prompt()
     }
 }
 
-pub(crate) fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
+fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
     run(&fs::read_to_string(file)?, &mut io::stdout().lock())
 }
 
-pub(crate) fn run_prompt() -> anyhow::Result<()> {
+fn run_prompt() -> anyhow::Result<()> {
     let mut stdout = io::stdout().lock();
     let mut stdin = io::stdin().lock();
     let mut stderr = io::stderr().lock();
@@ -72,3 +70,14 @@ pub(crate) fn run_prompt() -> anyhow::Result<()> {
         buf.clear();
     }
 }
+
+#[macro_use]
+mod macros;
+
+#[expect(
+    clippy::single_component_path_imports,
+    reason = "The macro is meant to be reexported at the crate level, and more specifically, at \
+              the very end of the entry point to the binary, such that this reexport truly opens \
+              up use to all crates as if it had been declared locally at the top of the module."
+)]
+pub(crate) use writef;

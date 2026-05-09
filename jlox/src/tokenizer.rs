@@ -1,27 +1,31 @@
-use std::borrow::Cow;
-
 mod errors;
+mod lexeme;
 mod literal;
 mod location;
 mod scanner;
 mod token_type;
 
 pub(crate) use crate::tokenizer::{
-    errors::*, literal::Lit, location::Location, token_type::TokenType,
+    lexeme::Lexeme, literal::Lit, location::Location, token_type::TokenType,
 };
 
 #[derive(Debug)]
-pub(crate) enum Num {
+pub(crate) struct Num {
+    repr: NumRepr,
+}
+
+#[derive(Debug)]
+enum NumRepr {
     Decimal(f64),
     Integer(usize),
 }
 
 #[derive(Debug)]
 pub(crate) struct Token {
-    pub(crate) ty: TokenType,
-    pub(crate) lex: Cow<'static, str>,
-    pub(crate) lit: Option<Lit>,
-    pub(crate) loc: Location,
+    ty: TokenType,
+    lex: Lexeme,
+    lit: Option<Lit>,
+    loc: Location,
 }
 
 impl Token {
