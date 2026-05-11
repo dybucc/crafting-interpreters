@@ -50,10 +50,6 @@ struct StrRepr<'a> {
 }
 
 impl StrRepr<'_> {
-    fn from_static(s: &'static str) -> Self {
-        Self { inner: s.into() }
-    }
-
     fn new(s: impl AsRef<str>) -> Self {
         Self {
             inner: s.as_ref().to_owned().into(),

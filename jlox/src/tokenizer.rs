@@ -38,14 +38,14 @@ impl Token {
 
                 Self {
                     ty: TokenType::single(byte),
-                    lex: String::from(byte as char).into(),
+                    lex: bytes.into(),
                     lit: None,
                     loc,
                 }
             }
             2 => Self {
                 ty: TokenType::compound(bytes),
-                lex: String::from_utf8_lossy_owned(bytes.to_owned()).into(),
+                lex: bytes.into(),
                 lit: None,
                 loc,
             },
