@@ -1,7 +1,5 @@
 use std::{borrow::Cow, convert::Infallible, str::FromStr};
 
-use crate::tokenizer::Num;
-
 #[derive(Debug)]
 pub(crate) struct Lit {
     repr: LitRepr,
@@ -19,6 +17,17 @@ impl FromStr for Lit {
 enum LitRepr {
     Str(Str),
     Num(Num),
+}
+
+#[derive(Debug)]
+struct Num {
+    repr: NumRepr,
+}
+
+#[derive(Debug)]
+enum NumRepr {
+    Decimal(f64),
+    Integer(usize),
 }
 
 impl FromStr for LitRepr {
