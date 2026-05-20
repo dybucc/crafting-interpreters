@@ -4,7 +4,7 @@ use crate::tokenizer::{Lexeme, Lit, Location, Token, TokenType};
 
 #[derive(Debug, Default)]
 pub(crate) struct TokenBuilder {
-    repr: TokenRepr,
+    repr: Option<TokenConfigurator>,
 }
 
 impl TokenBuilder {
@@ -31,9 +31,10 @@ impl TokenBuilder {
             "bytes in single token constructor should be made up of a single raw byte"
         );
 
-        match repr.kind() {
-            TokenKind::Empty => *repr = TokenRepr::single(bytes, loc),
-            TokenKind::Configuration => repr.recycle_single(*bytes.first().unwrap(), loc),
+        if let Some(config) = repr {
+            config.recycle_single(*bytes.first().unwrap(), loc)
+        } else {
+            *repr = TokenConfigurator::single(*bytes.first().unwrap(), loc).into()
         }
 
         self
@@ -42,9 +43,10 @@ impl TokenBuilder {
     pub(crate) fn compound(&mut self, bytes: &[u8], loc: Location) -> &mut Self {
         let TokenBuilder { repr } = self;
 
-        match repr.kind() {
-            TokenKind::Empty => *repr = TokenRepr::compound(bytes, loc),
-            TokenKind::Configuration => repr.recycle_compound(bytes, loc),
+        if let Some(config) = repr {
+            config.recycle_compound(bytes, loc);
+        } else {
+            *repr = TokenConfigurator::compound(bytes, loc).into();
         }
 
         self
@@ -53,93 +55,13 @@ impl TokenBuilder {
     pub(crate) fn multiple(&mut self, bytes: &[u8], hint: TokenType, loc: Location) -> &mut Self {
         let TokenBuilder { repr } = self;
 
-        match repr.kind() {
-            TokenKind::Empty => *repr = TokenRepr::multiple(bytes, hint, loc),
-            TokenKind::Configuration => repr.recycle_multiple(bytes, hint, loc),
+        if let Some(config) = repr {
+            config.recycle_multiple(bytes, hint, loc);
+        } else {
+            *repr = TokenConfigurator::multiple(bytes, hint, loc).into();
         }
 
         self
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TokenKind {
-    Empty,
-    Configuration,
-}
-
-#[derive(Debug, Default)]
-enum TokenRepr {
-    #[default]
-    Empty,
-    Configuration(TokenConfigurator),
-}
-
-impl TokenRepr {
-    const UNFINISHED_CONFIG: &str =
-        "configurator did not contain enough information to build token";
-
-    pub(crate) fn add_lexeme(&mut self, lex: impl AsRef<[u8]>) {
-        match self {
-            Self::Empty => panic!("{}", Self::UNFINISHED_CONFIG),
-            Self::Configuration(token_configurator) => todo!(),
-        }
-    }
-
-    fn recycle_single(&mut self, byte: u8, loc: Location) {
-        match self {
-            Self::Empty => panic!("{}", Self::UNFINISHED_CONFIG),
-            Self::Configuration(token_configurator) => token_configurator.recycle_single(byte, loc),
-        }
-    }
-
-    fn recycle_compound(&mut self, bytes: &[u8], loc: Location) {
-        match self {
-            Self::Empty => panic!("{}", Self::UNFINISHED_CONFIG),
-            Self::Configuration(token_configurator) => {
-                token_configurator.recycle_compound(bytes, loc)
-            }
-        }
-    }
-
-    fn recycle_multiple(&mut self, bytes: &[u8], hint: TokenType, loc: Location) {
-        match self {
-            Self::Empty => panic!("{}", Self::UNFINISHED_CONFIG),
-            Self::Configuration(token_configurator) => {
-                token_configurator.recycle_multiple(bytes, hint, loc)
-            }
-        }
-    }
-
-    fn finalize(&mut self) -> Token {
-        match self {
-            Self::Empty => {
-                panic!("{}", Self::UNFINISHED_CONFIG)
-            }
-            Self::Configuration(token_configurator) => token_configurator.finalize(),
-        }
-    }
-
-    fn single(bytes: &[u8], loc: Location) -> Self {
-        Self::Configuration(TokenConfigurator::single(
-            bytes.first().copied().unwrap(),
-            loc,
-        ))
-    }
-
-    fn compound(bytes: &[u8], loc: Location) -> Self {
-        Self::Configuration(TokenConfigurator::compound(bytes, loc))
-    }
-
-    fn multiple(bytes: &[u8], hint: TokenType, loc: Location) -> Self {
-        Self::Configuration(TokenConfigurator::multiple(bytes, hint, loc))
-    }
-
-    fn kind(&self) -> TokenKind {
-        match self {
-            Self::Empty => TokenKind::Empty,
-            Self::Configuration(_) => TokenKind::Configuration,
-        }
     }
 }
 
@@ -151,7 +73,7 @@ impl TokenRepr {
 struct TokenConfigurator {
     token_type: TokenType,
     loc: Location,
-    rest: Option<Delayed>,
+    rest: Delayed,
 }
 
 impl TokenConfigurator {
@@ -186,14 +108,25 @@ impl TokenConfigurator {
     }
 
     fn multiple(bytes: &[u8], token: TokenType, loc: Location) -> Self {
-        todo!()
+        Self {
+            token_type: token,
+            loc,
+            rest: match token {
+                TokenType::Ident => Delayed::new(bytes),
+                TokenType::String => Delayed::with_lit_str(bytes),
+                TokenType::Num => Delayed::with_lit_num(bytes),
+                TokenType::False => Delayed::with_lit_false(bytes),
+                TokenType::True => Delayed::with_lit_true(bytes),
+                _ => Delayed::new(bytes),
+            },
+        }
     }
 
     fn compound(bytes: &[u8], loc: Location) -> Self {
         Self {
             token_type: TokenType::compound(bytes),
             loc,
-            rest: Option::default(),
+            rest: Delayed::default(),
         }
     }
 
@@ -201,13 +134,41 @@ impl TokenConfigurator {
         Self {
             token_type: TokenType::single(byte),
             loc,
-            rest: Option::default(),
+            rest: Delayed::default(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Delayed {
-    lexeme: Lexeme,
+    lexeme: Option<Lexeme>,
     lit: Option<Lit>,
+}
+
+impl Delayed {
+    fn with_lit_str(bytes: impl AsRef<[u8]>) -> Self {
+        Self {
+            lexeme: Lexeme::from(bytes.as_ref()).into(),
+            lit: Lit::from(bytes.as_ref()).into(),
+        }
+    }
+
+    fn with_lit_num(bytes: impl AsRef<[u8]>) -> Self {
+        todo!()
+    }
+
+    fn with_lit_false(bytes: impl AsRef<[u8]>) -> Self {
+        todo!()
+    }
+
+    fn with_lit_true(bytes: impl AsRef<[u8]>) -> Self {
+        todo!()
+    }
+
+    fn new(bytes: impl AsRef<[u8]>) -> Self {
+        Self {
+            lexeme: Lexeme::from(bytes.as_ref()).into(),
+            lit: None,
+        }
+    }
 }
