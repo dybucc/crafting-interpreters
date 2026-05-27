@@ -1,4 +1,12 @@
-#![feature(bufreader_peek, string_from_utf8_lossy_owned)]
+#![feature(
+    bufreader_peek,
+    string_from_utf8_lossy_owned,
+    derive_const,
+    const_trait_impl,
+    const_cmp,
+    const_default,
+    const_clone
+)]
 
 use std::{
     fs,

@@ -13,7 +13,7 @@ pub(crate) use crate::tokenizer::{
 // building some abstraction over whether a literal is meant to hold something
 // or not.
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Token {
     ty: TokenType,
     lex: Lexeme,
