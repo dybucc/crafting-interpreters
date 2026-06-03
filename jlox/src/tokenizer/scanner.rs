@@ -5,10 +5,7 @@ use std::{
 
 use crate::{
     Error, ErrorTrace, ToError,
-    tokenizer::{
-        IoBound, Location, MalformedNumber, SyntaxError, Token, TokenType, UnexpectedEof,
-        scanner::peeker_pattern::PeekerPattern,
-    },
+    tokenizer::{Location, Token, TokenType, scanner::peeker_pattern::PeekerPattern},
 };
 
 mod peeker_pattern;

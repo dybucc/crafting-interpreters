@@ -1,20 +1,19 @@
-use std::{error::Error, fmt::Debug};
+use std::{
+    error::Error,
+    fmt::{self, Debug, Display},
+};
 
 use thiserror::Error;
 
 mod syntax_error;
 
-pub(crate) use crate::tokenizer::errors::syntax_error::{
-    InvalidUtf8, MalformedNumber, Other, SyntaxError, UnexpectedEof,
-};
+pub(crate) use crate::tokenizer::errors::syntax_error::SyntaxError;
 
-macro_rules! error_trace_impl {
-    ($($t:ident),+ $(,)?) => {
-        $(
-            impl $crate::error_rt::ErrorTrace for $t {}
-            impl $crate::error_rt::ToError for $t {}
-        )+
-    };
+pub(crate) trait TokenizerError: Error {
+    #[inline]
+    fn inner(&self) -> Box<dyn Display> {
+        Box::new(fmt::from_fn(|f| Display::fmt(self, f))) as Box<dyn Display>
+    }
 }
 
 #[derive(Debug, Error)]
@@ -22,13 +21,4 @@ macro_rules! error_trace_impl {
 pub(crate) struct IoBound {
     pub(crate) inner: Box<dyn Error + Send + Sync>,
     pub(crate) line: usize,
-}
-
-error_trace_impl! {
-    UnexpectedEof,
-    IoBound,
-    InvalidUtf8,
-    SyntaxError,
-    Other,
-    MalformedNumber
 }

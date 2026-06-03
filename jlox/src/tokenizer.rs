@@ -6,12 +6,8 @@ mod scanner;
 mod token_type;
 
 pub(crate) use crate::tokenizer::{
-    lexeme::Lexeme, literal::Lit, location::Location, token_type::TokenType,
+    errors::TokenizerError, lexeme::Lexeme, literal::Lit, location::Location, token_type::TokenType,
 };
-
-// TODO: finish implementing common traits for the below types, and see into
-// building some abstraction over whether a literal is meant to hold something
-// or not.
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Token {

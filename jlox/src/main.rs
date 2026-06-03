@@ -18,20 +18,11 @@ use std::{
 use clap::Parser;
 
 mod args;
-mod error_rt;
 mod runtime;
 mod support;
 mod tokenizer;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        clippy::wildcard_imports,
-        reason = "In this project, errors are meant to be wildard-imported."
-    )
-)]
-pub(crate) use crate::error_rt::*;
-pub(crate) use crate::{args::Args, runtime::run};
+use crate::{args::Args, runtime::run, tokenizer::TokenizerError};
 
 fn main() -> anyhow::Result<()> {
     if let Some(file) = Args::parse().script() {
@@ -65,7 +56,7 @@ fn run_prompt() -> anyhow::Result<()> {
         }
 
         if let Err(err) = run(buf.trim_ascii_end(), &mut stdout) {
-            match err.downcast::<crate::Error>() {
+            match err.downcast::<SyntaxError>() {
                 Ok(lang_err) => {
                     writef!(stderr)?;
                     lang_err.into_result().report();
