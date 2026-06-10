@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     error::Error,
-    hash::{Hash, Hasher},
+    hash::{Hash, Hasher}
 };
 
 use anyhow::anyhow;
@@ -13,35 +13,27 @@ use crate::tokenizer::Location;
 #[error("{span}: {src}")]
 pub(crate) struct SyntaxError {
     pub(crate) span: Location,
-    pub(crate) src: Box<dyn Error + Send + Sync + 'static>,
+    pub(crate) src: Box<dyn Error + Send + Sync + 'static>
 }
 
 impl SyntaxError {
     pub(crate) fn new(loc: Location, err: impl Error + Send + Sync + 'static) -> Self {
-        Self {
-            span: loc,
-            src: Box::new(err) as Box<dyn Error + Send + Sync + 'static>,
-        }
+        Self { span: loc, src: Box::new(err) as Box<dyn Error + Send + Sync + 'static> }
     }
 
     pub(crate) fn other(loc: Location, err: impl Error + Send + Sync + 'static) -> Self {
-        Self {
-            span: loc,
-            src: Box::new(err) as Box<dyn Error + Send + Sync + 'static>,
-        }
+        Self { span: loc, src: Box::new(err) as Box<dyn Error + Send + Sync + 'static> }
     }
 
     pub(crate) fn hash_with_err(&self, state: &mut impl Hasher) -> anyhow::Result<()> {
         self.span.hash(state);
 
-        ErrorKind::which(self.src)
-            .ok_or_else(|| anyhow!("PENDING"))
-            .map(|err| match err {
-                ErrorKind::MalformedNumber => todo!(),
-                ErrorKind::UnexpectedEof => todo!(),
-                ErrorKind::InvalidUtf8 => todo!(),
-                ErrorKind::Other => todo!(),
-            })
+        ErrorKind::which(self.src).ok_or_else(|| anyhow!("PENDING")).map(|err| match err {
+            ErrorKind::MalformedNumber => todo!(),
+            ErrorKind::UnexpectedEof => todo!(),
+            ErrorKind::InvalidUtf8 => todo!(),
+            ErrorKind::Other => todo!()
+        })
     }
 
     pub(crate) fn same_line(&self, other: &Self) -> bool {
@@ -73,16 +65,13 @@ impl SyntaxError {
 ///
 /// [`SyntaxError::hash_with_err`]: self::SyntaxError::hash_with_err
 impl Hash for SyntaxError {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.span.hash(state);
-    }
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.span.hash(state); }
 }
 
 impl PartialEq for SyntaxError {
     fn eq(&self, other: &Self) -> bool {
         matches!(
-            self.partial_cmp(other)
-                .expect("pointer errors did not contain syntax errors"),
+            self.partial_cmp(other).expect("internal error did not contain syntax errors"),
             Ordering::Equal
         )
     }
@@ -102,7 +91,7 @@ impl PartialOrd for SyntaxError {
             Ordering::Equal => ErrorKind::which(self.src).and_then(|self_err| {
                 ErrorKind::which(other.src).map(|other_err| self_err.cmp(&other_err))
             }),
-            other => other.into(),
+            other => other.into()
         }
     }
 }

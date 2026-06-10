@@ -8,7 +8,7 @@ use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::ControlFlow,
-    rc::Rc,
+    rc::Rc
 };
 
 use itertools::Itertools;
@@ -19,18 +19,15 @@ type Inner<T> = RefCell<Node<T>>;
 pub struct DoublyLinkedList<T> {
     start: Option<Rc<Inner<T>>>,
     end: Option<Rc<Inner<T>>>,
-    len: usize,
+    len: usize
 }
 
 #[derive(Error, Debug)]
 pub enum InsertElemError {
     #[error("passed index {wrong_index} out of bounds; only {actual_elements} elements available")]
-    IndexOutOfBounds {
-        wrong_index: usize,
-        actual_elements: usize,
-    },
+    IndexOutOfBounds { wrong_index: usize, actual_elements: usize },
     #[error("list is empty; elements can only be added to the list by index if it's non-empty")]
-    EmptyList,
+    EmptyList
 }
 
 #[macro_export]
@@ -44,33 +41,20 @@ macro_rules! insert {
 }
 
 impl<T> DoublyLinkedList<T> {
-    #[expect(
-        clippy::must_use_candidate,
-        reason = "It's not a bug for a list to be discarded."
-    )]
-    pub fn new() -> Self {
-        Self {
-            start: None,
-            end: None,
-            len: 0,
-        }
-    }
+    #[expect(clippy::must_use_candidate, reason = "It's not a bug for a list to be discarded.")]
+    pub fn new() -> Self { Self { start: None, end: None, len: 0 } }
 
     #[expect(
         clippy::must_use_candidate,
         reason = "It's not a bug not to use the result fo this function."
     )]
-    pub fn len(&self) -> usize {
-        self.len
-    }
+    pub fn len(&self) -> usize { self.len }
 
     #[expect(
         clippy::must_use_candidate,
         reason = "It's not a bug not to use the result fo this function."
     )]
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
+    pub fn is_empty(&self) -> bool { self.len == 0 }
 
     fn init_single_elem(&mut self, new: Node<T>) {
         let new = Rc::new(RefCell::new(new));
@@ -80,11 +64,7 @@ impl<T> DoublyLinkedList<T> {
     }
 
     pub fn insert_at<Q: Into<T>>(&mut self, other: Q, pos: InsertionPos) {
-        let new = Node {
-            left: None,
-            right: None,
-            inner: other.into(),
-        };
+        let new = Node { left: None, right: None, inner: other.into() };
         match pos {
             InsertionPos::Start => {
                 let (Some(start), Some(end)) = (&self.start, &mut self.end) else {
@@ -101,7 +81,7 @@ impl<T> DoublyLinkedList<T> {
                         "if `start != end`, then the right of `old` ought be pointing to a \
                          non-`None` as it is the older `start` and the pointers are to the \
                          `RefCell`s and not to the actual `Node`s so the above check is the same \
-                         as `old != end`",
+                         as `old != end`"
                     ))
                     .left = Some(Rc::clone(&old));
 
@@ -123,7 +103,7 @@ impl<T> DoublyLinkedList<T> {
                         "if `start != end`, then the left of `old` ought be pointing to a \
                          non-`None` as it is the older `end` and the pointers are to the \
                          `RefCell`s and not to the actual `Node`s so the above check is the same \
-                         as `start != old`",
+                         as `start != old`"
                     ))
                     .right = Some(Rc::clone(&old));
 
@@ -137,14 +117,10 @@ impl<T> DoublyLinkedList<T> {
     pub fn insert_at_idx<Q: Into<T>>(
         &mut self,
         other: Q,
-        idx: usize,
+        idx: usize
     ) -> Result<(), InsertElemError> {
         self.start.as_ref().ok_or(InsertElemError::EmptyList)?;
-        let new = Node {
-            left: None,
-            right: None,
-            inner: other.into(),
-        };
+        let new = Node { left: None, right: None, inner: other.into() };
         let (ControlFlow::Break((len, elem)) | ControlFlow::Continue((len, elem))) = self
             .ptr_iter()
             .enumerate()
@@ -158,19 +134,19 @@ impl<T> DoublyLinkedList<T> {
             .map_continue(|result| {
                 result.expect(
                     "`result` can never be `None` because the list is checked for emptyness at \
-                     the start of the method",
+                     the start of the method"
                 )
             })
             .map_break(|result| {
                 result.expect(
                     "`result` can never be `None` because the list is checked for emptyness at \
-                     the start of the method",
+                     the start of the method"
                 )
             });
         if let Some(len) = len {
             return Err(InsertElemError::IndexOutOfBounds {
                 wrong_index: idx,
-                actual_elements: len,
+                actual_elements: len
             });
         }
         let Some(end) = &mut self.end else {
@@ -198,17 +174,16 @@ impl<T> DoublyLinkedList<T> {
 
     pub fn get<Q: PartialEq + ?Sized>(&self, other: &Q) -> Option<&T>
     where
-        T: Borrow<Q>,
+        T: Borrow<Q>
     {
         self.iter().find(|&elem| elem.borrow() == other)
     }
 
     fn find_ptr<Q: PartialEq + ?Sized>(&self, other: &Q) -> Option<Rc<Inner<T>>>
     where
-        T: Borrow<Q>,
+        T: Borrow<Q>
     {
-        self.ptr_iter()
-            .find(|elem| RefCell::borrow(elem).inner.borrow() == other)
+        self.ptr_iter().find(|elem| RefCell::borrow(elem).inner.borrow() == other)
     }
 
     pub fn append<L: Into<Self>>(&mut self, other: L) {
@@ -226,7 +201,7 @@ impl<T> DoublyLinkedList<T> {
 
     pub fn delete<Q: PartialEq + ?Sized>(&mut self, other: &Q) -> Option<T>
     where
-        T: Borrow<Q>,
+        T: Borrow<Q>
     {
         #![expect(clippy::unit_arg, reason = "Beauty comes at a cost.")]
 
@@ -254,16 +229,12 @@ impl<T> DoublyLinkedList<T> {
 
         #[inline]
         fn rearrange_left<T>(left: &Rc<Inner<T>>, target: &Inner<T>) {
-            RefCell::borrow_mut(left)
-                .right
-                .clone_from(&RefCell::borrow(target).right);
+            RefCell::borrow_mut(left).right.clone_from(&RefCell::borrow(target).right);
         }
 
         #[inline]
         fn rearrange_right<T>(right: &Rc<Inner<T>>, target: &Inner<T>) {
-            RefCell::borrow_mut(right)
-                .left
-                .clone_from(&RefCell::borrow(target).left);
+            RefCell::borrow_mut(right).left.clone_from(&RefCell::borrow(target).left);
         }
 
         let target = self.find_ptr(other)?;
@@ -300,7 +271,7 @@ impl<T> DoublyLinkedList<T> {
         Iter {
             first: self.start.as_ref().map(|elem| elem.as_ptr().cast_const()),
             current: None,
-            _marker: PhantomData,
+            _marker: PhantomData
         }
     }
 
@@ -308,16 +279,11 @@ impl<T> DoublyLinkedList<T> {
         IterMut {
             first: self.start.as_ref().map(|elem| elem.as_ptr()),
             current: None,
-            _marker: PhantomData,
+            _marker: PhantomData
         }
     }
 
-    fn ptr_iter(&self) -> PtrIter<T> {
-        PtrIter {
-            first: self.start.clone(),
-            current: None,
-        }
-    }
+    fn ptr_iter(&self) -> PtrIter<T> { PtrIter { first: self.start.clone(), current: None } }
 }
 
 /// Inherent implementation replacing an implementation of `Clone`, such that
@@ -340,15 +306,13 @@ impl<T> DoublyLinkedList<T> {
     )]
     pub fn clone(&self) -> Self
     where
-        T: Clone,
+        T: Clone
     {
-        self.iter()
-            .map(Clone::clone)
-            .fold(Self::default(), |mut list, elem| {
-                insert!(list, elem);
+        self.iter().map(Clone::clone).fold(Self::default(), |mut list, elem| {
+            insert!(list, elem);
 
-                list
-            })
+            list
+        })
     }
 
     /// Clones only the pointers to each element of the list, without destroying
@@ -375,38 +339,28 @@ impl<T> DoublyLinkedList<T> {
 }
 
 impl<T: PartialEq> PartialEq for DoublyLinkedList<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other)
-    }
+    fn eq(&self, other: &Self) -> bool { self.iter().eq(other) }
 }
 
 impl<T: Eq> Eq for DoublyLinkedList<T> {}
 
 impl<T: PartialOrd> PartialOrd for DoublyLinkedList<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.iter().partial_cmp(other)
-    }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { self.iter().partial_cmp(other) }
 }
 
 impl<T: Ord> Ord for DoublyLinkedList<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.iter().cmp(other)
-    }
+    fn cmp(&self, other: &Self) -> Ordering { self.iter().cmp(other) }
 }
 
 #[cfg(all(feature = "hash_elem", not(feature = "hash_ptr")))]
 impl<T: Hash> Hash for DoublyLinkedList<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.iter().for_each(|elem| elem.hash(state));
-    }
+    fn hash<H: Hasher>(&self, state: &mut H) { self.iter().for_each(|elem| elem.hash(state)); }
 }
 
 #[cfg(all(feature = "hash_ptr", not(feature = "hash_elem")))]
 impl<T> Hash for DoublyLinkedList<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.ptr_iter()
-            .map(|ptr| Rc::as_ptr(&ptr))
-            .for_each(|ptr| ptr.hash(state));
+        self.ptr_iter().map(|ptr| Rc::as_ptr(&ptr)).for_each(|ptr| ptr.hash(state));
     }
 }
 
@@ -464,11 +418,7 @@ impl<T> IntoIterator for DoublyLinkedList<T> {
         self.start = None;
         self.end = None;
 
-        IntoIter {
-            first,
-            last,
-            next_ptr: None,
-        }
+        IntoIter { first, last, next_ptr: None }
     }
 }
 
@@ -476,42 +426,32 @@ impl<'a, T: 'a> IntoIterator for &'a DoublyLinkedList<T> {
     type IntoIter = Iter<'a, T>;
     type Item = <Iter<'a, T> as Iterator>::Item;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.iter() }
 }
 
 impl<'a, T: 'a> IntoIterator for &'a mut DoublyLinkedList<T> {
     type IntoIter = IterMut<'a, T>;
     type Item = <IterMut<'a, T> as Iterator>::Item;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter_mut()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.iter_mut() }
 }
 
 impl<T> Default for DoublyLinkedList<T> {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl<T, A: Into<T>> FromIterator<A> for DoublyLinkedList<T> {
     fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
-        iter.into_iter()
-            .map_into::<T>()
-            .fold(Self::default(), |mut list, elem| {
-                insert!(list, elem);
+        iter.into_iter().map_into::<T>().fold(Self::default(), |mut list, elem| {
+            insert!(list, elem);
 
-                list
-            })
+            list
+        })
     }
 }
 
 impl<T, A: Into<T>> Extend<A> for DoublyLinkedList<T> {
-    fn extend<I: IntoIterator<Item = A>>(&mut self, iter: I) {
-        self.append(Self::from_iter(iter));
-    }
+    fn extend<I: IntoIterator<Item = A>>(&mut self, iter: I) { self.append(Self::from_iter(iter)); }
 
     fn extend_one(&mut self, item: A) {
         insert!(self, item);
@@ -521,20 +461,20 @@ impl<T, A: Into<T>> Extend<A> for DoublyLinkedList<T> {
 #[derive(Debug, Clone, Copy)]
 pub enum InsertionPos {
     Start,
-    End,
+    End
 }
 
 #[derive(Debug)]
 struct Node<T> {
     left: Option<Rc<Inner<T>>>,
     right: Option<Rc<Inner<T>>>,
-    inner: T,
+    inner: T
 }
 
 pub struct IntoIter<T> {
     first: Option<Rc<Inner<T>>>,
     last: Option<Rc<Inner<T>>>,
-    next_ptr: Option<Rc<Inner<T>>>,
+    next_ptr: Option<Rc<Inner<T>>>
 }
 
 impl<T> Iterator for IntoIter<T> {
@@ -553,7 +493,7 @@ impl<T> Iterator for IntoIter<T> {
 
                     Some(
                         Rc::into_inner(first)
-                            .expect("the first element of the list should be isolated here"),
+                            .expect("the first element of the list should be isolated here")
                     )
                 }
                 // It's worth it *not* to keep an exclusive reference to the option's generic
@@ -565,25 +505,25 @@ impl<T> Iterator for IntoIter<T> {
                         &current_ptr,
                         self.last.as_ref().expect(
                             "if we've reached the point where there was a viable next pointer, \
-                             then surely there's an end item in the list",
-                        ),
+                             then surely there's an end item in the list"
+                        )
                     ) {
                         (self.next_ptr, self.last) = (None, None);
                         break 'evaluator Some(
                             Rc::into_inner(current_ptr)
-                                .expect("the current element in the list should be isolated"),
+                                .expect("the current element in the list should be isolated")
                         );
                     }
                     let next = RefCell::borrow(&current_ptr).right.clone().expect(
                         "if `current_ptr` does not point to the same allocation as `self.last`, \
-                         then surely there's some list item to its left",
+                         then surely there's some list item to its left"
                     );
                     RefCell::borrow_mut(&next).left = None;
                     *next_option.unwrap() = next;
 
                     Some(
                         Rc::into_inner(current_ptr)
-                            .expect("the current element in the list should be isolated"),
+                            .expect("the current element in the list should be isolated")
                     )
                 }
             }
@@ -596,7 +536,7 @@ impl<T> Iterator for IntoIter<T> {
 pub struct Iter<'a, T: 'a> {
     first: Option<*const Node<T>>,
     current: Option<*const Node<T>>,
-    _marker: PhantomData<&'a T>,
+    _marker: PhantomData<&'a T>
 }
 
 impl<'a, T: 'a> Iterator for Iter<'a, T> {
@@ -618,8 +558,7 @@ impl<'a, T: 'a> Iterator for Iter<'a, T> {
             }
         }
 
-        self.current
-            .map(|elem| unsafe { &elem.as_ref_unchecked().inner })
+        self.current.map(|elem| unsafe { &elem.as_ref_unchecked().inner })
     }
 }
 
@@ -627,7 +566,7 @@ impl<'a, T: 'a> Iterator for Iter<'a, T> {
 pub struct IterMut<'a, T: 'a> {
     first: Option<*mut Node<T>>,
     current: Option<*mut Node<T>>,
-    _marker: PhantomData<&'a mut T>,
+    _marker: PhantomData<&'a mut T>
 }
 
 impl<'a, T: 'a> Iterator for IterMut<'a, T> {
@@ -652,15 +591,14 @@ impl<'a, T: 'a> Iterator for IterMut<'a, T> {
         // SAFETY: if execution flow has reached this point, then the pointer can
         // only ever be wrapped `Some` for the reasons mentioned in the above SAFETY
         // comment.
-        self.current
-            .map(|ptr| unsafe { &mut ptr.as_mut_unchecked().inner })
+        self.current.map(|ptr| unsafe { &mut ptr.as_mut_unchecked().inner })
     }
 }
 
 #[derive(Debug)]
 struct PtrIter<T> {
     first: Option<Rc<Inner<T>>>,
-    current: Option<Rc<Inner<T>>>,
+    current: Option<Rc<Inner<T>>>
 }
 
 impl<T> Iterator for PtrIter<T> {
@@ -677,7 +615,7 @@ impl<T> Iterator for PtrIter<T> {
             {
                 *indexer = Rc::clone(right);
             }
-            _ => self.current = None,
+            _ => self.current = None
         }
 
         self.current.as_ref().map(Rc::clone)
@@ -693,10 +631,7 @@ mod tests {
     macro_rules! insertion_test {
         ($list:expr, $new:expr, $pos:expr, $test:expr $(,)?) => {{
             $list.insert_at($new, $pos);
-            assert_eq!(
-                $list.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                $test
-            );
+            assert_eq!($list.iter().map(ToString::to_string).collect::<Vec<_>>(), $test);
         }};
     }
 
@@ -708,17 +643,11 @@ mod tests {
     macro_rules! deletion_test {
         ($list:expr,Some($test:expr), $state:expr $(,)?) => {{
             assert_eq!($list.delete($test), Some($test));
-            assert_eq!(
-                $list.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                $state
-            );
+            assert_eq!($list.iter().map(ToString::to_string).collect::<Vec<_>>(), $state);
         }};
         ($list:expr,None($test:expr), $state:expr $(,)?) => {{
             assert_eq!($list.delete($test), None);
-            assert_eq!(
-                $list.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                $state
-            );
+            assert_eq!($list.iter().map(ToString::to_string).collect::<Vec<_>>(), $state);
         }};
     }
 
@@ -726,12 +655,9 @@ mod tests {
     fn insertion_at_start() {
         let mut list: DoublyLinkedList<&str> = DoublyLinkedList::from_iter(["Something", "else"]);
         assert_eq!(list.len(), 2);
-        insertion_test!(
-            list,
-            "Something else",
-            InsertionPos::Start,
-            ["Something else", "Something", "else"]
-        );
+        insertion_test!(list, "Something else", InsertionPos::Start, [
+            "Something else", "Something", "else"
+        ]);
         assert_eq!(list.len(), 3);
     }
 
@@ -739,12 +665,7 @@ mod tests {
     fn insertion_at_end() {
         let mut list: DoublyLinkedList<&str> = DoublyLinkedList::from_iter(["Something", "else"]);
         assert_eq!(list.len(), 2);
-        insertion_test!(
-            list,
-            "Nothing",
-            InsertionPos::End,
-            ["Something", "else", "Nothing"]
-        );
+        insertion_test!(list, "Nothing", InsertionPos::End, ["Something", "else", "Nothing"]);
         assert_eq!(list.len(), 3);
     }
 
@@ -752,10 +673,7 @@ mod tests {
     fn insertion_at_idx_empty_list() {
         let mut list: DoublyLinkedList<&str> = DoublyLinkedList::default();
         assert_eq!(list.len(), 0);
-        assert_matches!(
-            list.insert_at_idx("Something", 0),
-            Err(InsertElemError::EmptyList)
-        );
+        assert_matches!(list.insert_at_idx("Something", 0), Err(InsertElemError::EmptyList));
         assert_eq!(list.len(), 0);
     }
 
@@ -765,10 +683,9 @@ mod tests {
         assert_eq!(list.len(), 2);
         let _ = list.insert_at_idx("NUMA", 1);
         assert_eq!(list.len(), 3);
-        assert_eq!(
-            list.iter().map(ToString::to_string).collect::<Vec<_>>(),
-            ["Something", "NUMA", "else"]
-        );
+        assert_eq!(list.iter().map(ToString::to_string).collect::<Vec<_>>(), [
+            "Something", "NUMA", "else"
+        ]);
     }
 
     #[test]
@@ -777,10 +694,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_matches!(
             list.insert_at_idx("NUMA", 10),
-            Err(InsertElemError::IndexOutOfBounds {
-                wrong_index: 10,
-                actual_elements: 2,
-            })
+            Err(InsertElemError::IndexOutOfBounds { wrong_index: 10, actual_elements: 2 })
         );
         assert_eq!(list.len(), 2);
     }
@@ -818,10 +732,9 @@ mod tests {
         let mut list: DoublyLinkedList<&str> = DoublyLinkedList::from_iter(["Something", "else"]);
         itertools::assert_equal(list.iter().map(Deref::deref), ["Something", "else"]);
         list.extend(["nothing", "else"]);
-        itertools::assert_equal(
-            list.iter().map(Deref::deref),
-            ["Something", "else", "nothing", "else"],
-        );
+        itertools::assert_equal(list.iter().map(Deref::deref), [
+            "Something", "else", "nothing", "else"
+        ]);
     }
 
     #[test]
@@ -829,15 +742,13 @@ mod tests {
         let mut list: DoublyLinkedList<&str> = DoublyLinkedList::from_iter(["Something", "else"]);
         itertools::assert_equal(list.iter().map(Deref::deref), ["Something", "else"]);
         list.extend(["nothing", "else"]);
-        itertools::assert_equal(
-            list.iter().map(Deref::deref),
-            ["Something", "else", "nothing", "else"],
-        );
+        itertools::assert_equal(list.iter().map(Deref::deref), [
+            "Something", "else", "nothing", "else"
+        ]);
         list.extend(["nothing", "else"]);
-        itertools::assert_equal(
-            list.iter().map(Deref::deref),
-            ["Something", "else", "nothing", "else", "nothing", "else"],
-        );
+        itertools::assert_equal(list.iter().map(Deref::deref), [
+            "Something", "else", "nothing", "else", "nothing", "else"
+        ]);
     }
 
     #[test]
@@ -852,7 +763,7 @@ mod tests {
     fn clone_from_empty_list() {
         let (mut list1, list2): (DoublyLinkedList<&str>, DoublyLinkedList<&str>) = (
             DoublyLinkedList::from_iter::<[&str; _]>([]),
-            DoublyLinkedList::from_iter(["one", "other"]),
+            DoublyLinkedList::from_iter(["one", "other"])
         );
         itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), []);
         itertools::assert_equal(list2.iter().map(Deref::deref), ["one", "other"]);
@@ -869,7 +780,7 @@ mod tests {
     fn clone_empty_list() {
         let (mut list1, list2): (DoublyLinkedList<&str>, DoublyLinkedList<&str>) = (
             DoublyLinkedList::from_iter(["one", "other"]),
-            DoublyLinkedList::from_iter::<[&str; _]>([]),
+            DoublyLinkedList::from_iter::<[&str; _]>([])
         );
         itertools::assert_equal(list1.iter().map(Deref::deref), ["one", "other"]);
         itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), []);
@@ -882,12 +793,11 @@ mod tests {
     fn clone_non_empty_lists() {
         let (mut list1, list2): (DoublyLinkedList<&str>, DoublyLinkedList<&str>) = (
             DoublyLinkedList::from_iter(["Something", "else"]),
-            DoublyLinkedList::from_iter(["other", "one"]),
+            DoublyLinkedList::from_iter(["other", "one"])
         );
-        itertools::assert_equal::<_, [&str; _]>(
-            list1.iter().map(Deref::deref),
-            ["Something", "else"],
-        );
+        itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), [
+            "Something", "else"
+        ]);
         itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), ["other", "one"]);
         list1.clone_from(&list2);
         itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), ["other", "one"]);
@@ -901,19 +811,16 @@ mod tests {
     #[test]
     fn deep_clone() {
         let list1: DoublyLinkedList<&str> = DoublyLinkedList::from_iter(["something", "else"]);
-        itertools::assert_equal::<_, [&str; _]>(
-            list1.iter().map(Deref::deref),
-            ["something", "else"],
-        );
+        itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), [
+            "something", "else"
+        ]);
         let list2 = list1.clone();
-        itertools::assert_equal::<_, [&str; _]>(
-            list1.iter().map(Deref::deref),
-            ["something", "else"],
-        );
-        itertools::assert_equal::<_, [&str; _]>(
-            list2.iter().map(Deref::deref),
-            ["something", "else"],
-        );
+        itertools::assert_equal::<_, [&str; _]>(list1.iter().map(Deref::deref), [
+            "something", "else"
+        ]);
+        itertools::assert_equal::<_, [&str; _]>(list2.iter().map(Deref::deref), [
+            "something", "else"
+        ]);
     }
 
     #[test]
@@ -954,19 +861,16 @@ mod tests {
                 // SAFETY: the pointers are to elements allocated in the list, so
                 // retreving a reference to the underlying value is sound with the given
                 // method lifetime bounds.
-                out.into_iter()
-                    .map(|ptr| unsafe { ptr.as_ref_unchecked() })
-                    .collect()
+                out.into_iter().map(|ptr| unsafe { ptr.as_ref_unchecked() }).collect()
             }
         }
 
         #[test]
         fn consuming_iter() {
             let list: DoublyLinkedList<&str> = DoublyLinkedList::from_iter(["Something", "else"]);
-            itertools::assert_equal(
-                list.state().as_array::<2>().unwrap().map(Deref::deref),
-                ["Something", "else"],
-            );
+            itertools::assert_equal(list.state().as_array::<2>().unwrap().map(Deref::deref), [
+                "Something", "else"
+            ]);
             for elem in list {
                 dbg!(elem);
             }
@@ -975,34 +879,30 @@ mod tests {
         #[test]
         fn shared_iter() {
             let list: DoublyLinkedList<&str> = DoublyLinkedList::from_iter(["Something", "else"]);
-            itertools::assert_equal(
-                list.state().as_array::<2>().unwrap().map(Deref::deref),
-                ["Something", "else"],
-            );
+            itertools::assert_equal(list.state().as_array::<2>().unwrap().map(Deref::deref), [
+                "Something", "else"
+            ]);
             for elem in &list {
                 dbg!(elem);
             }
-            itertools::assert_equal(
-                list.state().as_array::<2>().unwrap().map(Deref::deref),
-                ["Something", "else"],
-            );
+            itertools::assert_equal(list.state().as_array::<2>().unwrap().map(Deref::deref), [
+                "Something", "else"
+            ]);
         }
 
         #[test]
         fn exclusive_iter() {
             let mut list: DoublyLinkedList<&str> =
                 DoublyLinkedList::from_iter(["Something", "else"]);
-            itertools::assert_equal(
-                list.state().as_array::<2>().unwrap().map(Deref::deref),
-                ["Something", "else"],
-            );
+            itertools::assert_equal(list.state().as_array::<2>().unwrap().map(Deref::deref), [
+                "Something", "else"
+            ]);
             for elem in &mut list {
                 dbg!(elem);
             }
-            itertools::assert_equal(
-                list.state().as_array::<2>().unwrap().map(Deref::deref),
-                ["Something", "else"],
-            );
+            itertools::assert_equal(list.state().as_array::<2>().unwrap().map(Deref::deref), [
+                "Something", "else"
+            ]);
         }
     }
 }

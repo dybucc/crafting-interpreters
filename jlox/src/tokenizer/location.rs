@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    fmt::{self, Display},
+    fmt::{self, Display}
 };
 
 #[derive(Debug, Copy, Hash)]
@@ -8,19 +8,15 @@ use std::{
 pub(crate) struct Location {
     line: usize,
     col: usize,
-    len: usize,
+    len: usize
 }
 
 impl Location {
     #[inline]
-    pub(crate) fn new(line: usize, col: usize, len: usize) -> Self {
-        Self { line, col, len }
-    }
+    pub(crate) fn new(line: usize, col: usize, len: usize) -> Self { Self { line, col, len } }
 
     #[inline]
-    pub(crate) fn same_line(&self, other: &Self) -> bool {
-        self.line == other.line
-    }
+    pub(crate) fn same_line(&self, other: &Self) -> bool { self.line == other.line }
 
     // NOTE: if this is used outside `SyntaxError`s, consider adding a
     // different/auxiliary routine to consider more cases of similarity between
@@ -57,24 +53,18 @@ impl Location {
                 self.col = other.col;
                 self.len += self.col - other.col;
             }
-            Ordering::Equal => self.len += other.len,
+            Ordering::Equal => self.len += other.len
         }
     }
 
     #[inline]
-    pub(crate) fn line(&self) -> usize {
-        self.line
-    }
+    pub(crate) fn line(&self) -> usize { self.line }
 
     #[inline]
-    pub(crate) fn col(&self) -> usize {
-        self.col
-    }
+    pub(crate) fn col(&self) -> usize { self.col }
 
     #[inline]
-    pub(crate) fn len(&self) -> usize {
-        self.len
-    }
+    pub(crate) fn len(&self) -> usize { self.len }
 }
 
 /// This implementation serves as a safe default, with a format `{line}:{col}`.

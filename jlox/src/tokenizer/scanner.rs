@@ -1,11 +1,11 @@
 use std::{
     io::{self, BufReader, Cursor, Read},
-    ops::Not,
+    ops::Not
 };
 
 use crate::{
     Error, ErrorTrace, ToError,
-    tokenizer::{Location, Token, TokenType, scanner::peeker_pattern::PeekerPattern},
+    tokenizer::{Location, Token, TokenType, scanner::peeker_pattern::PeekerPattern}
 };
 
 mod peeker_pattern;
@@ -14,7 +14,7 @@ mod peeker_pattern;
 pub(crate) struct Scanner<'a> {
     buf: BufReader<Cursor<&'a [u8]>>,
     line: usize,
-    col: usize,
+    col: usize
 }
 
 impl Default for Scanner<'_> {
@@ -22,48 +22,33 @@ impl Default for Scanner<'_> {
         Self {
             buf: BufReader::new(Cursor::new(&[])),
             line: usize::default(),
-            col: usize::default(),
+            col: usize::default()
         }
     }
 }
 
 impl<'a> Scanner<'a> {
     pub(crate) fn new(buf: &'a [u8]) -> Self {
-        Self {
-            buf: BufReader::new(Cursor::new(buf)),
-            ..Default::default()
-        }
+        Self { buf: BufReader::new(Cursor::new(buf)), ..Default::default() }
     }
 
-    pub(crate) fn buf_mut(&mut self) -> &mut BufReader<Cursor<&'a [u8]>> {
-        &mut self.buf
-    }
+    pub(crate) fn buf_mut(&mut self) -> &mut BufReader<Cursor<&'a [u8]>> { &mut self.buf }
 }
 
 impl Scanner<'_> {
-    pub(crate) fn line(&self) -> usize {
-        self.line
-    }
+    pub(crate) fn line(&self) -> usize { self.line }
 
-    pub(crate) fn col(&self) -> usize {
-        self.col
-    }
+    pub(crate) fn col(&self) -> usize { self.col }
 
     pub(crate) fn advance(&mut self, buf: &mut [u8; 1]) -> Result<bool, Error> {
-        let Self {
-            buf: source, line, ..
-        } = self;
+        let Self { buf: source, line, .. } = self;
 
         if let Err(err) = source.read_exact(buf) {
             if matches!(err.kind(), io::ErrorKind::UnexpectedEof) {
                 return Ok(false);
             }
 
-            return Err(IoBound {
-                inner: err.into(),
-                line: *line,
-            }
-            .convert(None));
+            return Err(IoBound { inner: err.into(), line: *line }.convert(None));
         }
 
         Ok(true)
@@ -93,11 +78,7 @@ impl Scanner<'_> {
 
         macro_rules! new_token {
             ($bytes:expr, $len:expr) => {{
-                out.push(Token::new(
-                    $bytes,
-                    None,
-                    Location::new(self.line, self.col, $len),
-                ));
+                out.push(Token::new($bytes, None, Location::new(self.line, self.col, $len)));
 
                 self.col += 1;
             }};
@@ -105,7 +86,7 @@ impl Scanner<'_> {
                 out.push(Token::new(
                     $bytes,
                     $hint.into(),
-                    Location::new(self.line, self.col, $len),
+                    Location::new(self.line, self.col, $len)
                 ));
 
                 self.col += 1;
@@ -160,7 +141,7 @@ impl Scanner<'_> {
                 // if there's an ascii whitespace match beyond that, we can be sure it's not a line
                 // feed and can thus be safely ignored.
                 b if b.is_ascii_whitespace() => (),
-                _ => errors.push(SyntaxError::other(Location::new(self.line, self.col, 1))),
+                _ => errors.push(SyntaxError::other(Location::new(self.line, self.col, 1)))
             }
         }
 
@@ -208,13 +189,13 @@ type SpeculativeSyntaxError = Option<SyntaxError>;
 pub(crate) fn process_string(
     scanner: &mut Scanner,
     scan_buf: &mut [u8; 1],
-    aux_buf: &mut Vec<u8>,
+    aux_buf: &mut Vec<u8>
 ) -> Result<SpeculativeSyntaxError, Error> {
     loop {
         if scanner.advance(scan_buf)?.not() {
             return Ok(SyntaxError::new(
                 Location::new(scanner.line, scanner.col, aux_buf.len()),
-                Box::new(UnexpectedEof) as Box<dyn ErrorTrace>,
+                Box::new(UnexpectedEof) as Box<dyn ErrorTrace>
             )
             .into());
         }
@@ -231,7 +212,7 @@ pub(crate) fn process_string(
 pub(crate) fn process_digits(
     scanner: &mut Scanner,
     scan_buf: &mut [u8; 1],
-    mut aux_buf: impl AsMut<[u8]>,
+    mut aux_buf: impl AsMut<[u8]>
 ) -> Result<Vec<SyntaxError>, Error> {
     let aux_buf = aux_buf.as_mut();
     let mut errors = Vec::new();
@@ -244,7 +225,7 @@ pub(crate) fn process_digits(
             } else {
                 errors.push(SyntaxError::new(
                     Location::new(scanner.line(), scanner.col(), aux_buf.len()),
-                    Box::new(MalformedNumber) as Box<dyn ErrorTrace>,
+                    Box::new(MalformedNumber) as Box<dyn ErrorTrace>
                 ));
 
                 break;

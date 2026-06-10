@@ -1,4 +1,8 @@
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display as StdDisplay, Formatter};
+
+mod display;
+
+pub(crate) use display::Display;
 
 #[derive(Debug, Copy, Hash)]
 #[derive_const(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,7 +46,7 @@ pub(crate) enum TokenType {
     True,
     Var,
     While,
-    Eof,
+    Eof
 }
 
 impl TokenType {
@@ -52,7 +56,7 @@ impl TokenType {
             b"==" => TokenType::EqualEqual,
             b">=" => TokenType::GreaterEqual,
             b"<=" => TokenType::LessEqual,
-            _ => unreachable!(),
+            _ => unreachable!()
         }
     }
 
@@ -72,15 +76,35 @@ impl TokenType {
             b'=' => TokenType::Equal,
             b'>' => TokenType::Greater,
             b'<' => TokenType::Less,
-            _ => unreachable!(),
+            _ => unreachable!()
         }
+    }
+
+    /// Provided an external displayable type, this will return a display
+    /// adapter that will use that displayable if the token type is one of a
+    /// string, an idenfitfier or a number.
+    ///
+    /// Otherwise, the default [`Display`] impl for `TokenType` will be used
+    /// instead.
+    ///
+    /// [`Display`]: trait@std::fmt::Display
+    pub(crate) fn display_with(self, token: &impl StdDisplay) -> Display<'_> {
+        Display::new(self, token)
     }
 }
 
-// TODO: create a display adapter type that can accurately produce a display
-// representation of the string, number, etc. contained in whichever overarching
-// type contains itself the `TokenType` type.
-impl Display for TokenType {
+/// Displays the token type with lossy information for richer token types.
+///
+/// This implementation will correctly provide the same source code
+/// representations of each token type to all tokens but strings, identifiers,
+/// and numbers. These will use a fallback display implementation that is likely
+/// not representative of the token itself.
+///
+/// To provide as well a type with which to format the afore mentioned token
+/// types, see the [`TokenType::display_with`] method.
+///
+/// [`TokenType::display_with`]: fn@self::TokenType::display_with
+impl StdDisplay for TokenType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::LeftParen => f.pad("("),
@@ -121,7 +145,7 @@ impl Display for TokenType {
             Self::True => f.pad("true"),
             Self::Var => f.pad("var"),
             Self::While => f.pad("while"),
-            Self::Eof => f.pad("{eof}"),
+            Self::Eof => f.pad("{eof}")
         }
     }
 }

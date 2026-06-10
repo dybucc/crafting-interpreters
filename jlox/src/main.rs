@@ -1,18 +1,13 @@
 #![feature(
-    bufreader_peek,
-    string_from_utf8_lossy_owned,
-    derive_const,
-    const_trait_impl,
-    const_cmp,
-    const_default,
-    const_clone
+    bufreader_peek, string_from_utf8_lossy_owned, derive_const, const_trait_impl, const_cmp,
+    const_default, const_clone
 )]
 
 use std::{
     fs,
     io::{self, BufRead, Write},
     path::Path,
-    process::Termination,
+    process::Termination
 };
 
 use clap::Parser;
@@ -22,14 +17,10 @@ mod runtime;
 mod support;
 mod tokenizer;
 
-use crate::{args::Args, runtime::run, tokenizer::TokenizerError};
+use crate::{args::Args, runtime::run, tokenizer::SyntaxError};
 
 fn main() -> anyhow::Result<()> {
-    if let Some(file) = Args::parse().script() {
-        run_file(file)
-    } else {
-        run_prompt()
-    }
+    if let Some(file) = Args::parse().script() { run_file(file) } else { run_prompt() }
 }
 
 fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
@@ -52,17 +43,17 @@ fn run_prompt() -> anyhow::Result<()> {
         match stdin.read_line(&mut buf) {
             Ok(0) => break writef!(stderr).map_err(Into::into),
             Err(err) => break Err(Into::into(err)),
-            _ => (),
+            _ => ()
         }
 
         if let Err(err) = run(buf.trim_ascii_end(), &mut stdout) {
             match err.downcast::<SyntaxError>() {
                 Ok(lang_err) => {
                     writef!(stderr)?;
-                    lang_err.into_result().report();
+                    writef!(stderr, "{}", lang_err)?;
                     writef!(stderr)?;
                 }
-                Err(other_error) => break Err(other_error),
+                Err(other_error) => break Err(other_error)
             }
         }
 
@@ -76,7 +67,8 @@ mod macros;
 #[expect(
     clippy::single_component_path_imports,
     reason = "The macro is meant to be reexported at the crate level, and more specifically, at \
-              the very end of the entry point to the binary, such that this reexport truly opens \
-              up use to all crates as if it had been declared locally at the top of the module."
+              the very end of the entry point to the binary. Reexporting this at the end of the \
+              main module then makes all other crate modules be forced to import the macro in \
+              much the same way as other items in the type namespace."
 )]
 pub(crate) use writef;

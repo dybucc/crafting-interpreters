@@ -1,6 +1,6 @@
 use std::{
     error::Error,
-    fmt::{self, Debug, Display},
+    fmt::{self, Debug, Display}
 };
 
 use thiserror::Error;
@@ -20,5 +20,5 @@ pub(crate) trait TokenizerError: Error {
 #[error("io error while reading line {line}: `{inner}`")]
 pub(crate) struct IoBound {
     pub(crate) inner: Box<dyn Error + Send + Sync>,
-    pub(crate) line: usize,
+    pub(crate) line: usize
 }
