@@ -16,13 +16,13 @@ impl Location {
     pub(crate) fn new(line: usize, col: usize, len: usize) -> Self { Self { line, col, len } }
 
     #[inline]
-    pub(crate) fn same_line(&self, other: &Self) -> bool { self.line == other.line }
+    pub(crate) fn same_line(self, other: Self) -> bool { self.line == other.line }
 
     // NOTE: if this is used outside `SyntaxError`s, consider adding a
     // different/auxiliary routine to consider more cases of similarity between
     // spans, beyond column comparison in the same line.
     #[inline]
-    pub(crate) fn akin_col(&self, other: &Self) -> bool {
+    pub(crate) fn akin_col(self, other: Self) -> bool {
         // NOTE: example showcase of syntax error spans being merged. Locations are
         // determined to be akin if they compare equal within one byte offset
         // difference.
@@ -58,13 +58,13 @@ impl Location {
     }
 
     #[inline]
-    pub(crate) fn line(&self) -> usize { self.line }
+    pub(crate) fn line(self) -> usize { self.line }
 
     #[inline]
-    pub(crate) fn col(&self) -> usize { self.col }
+    pub(crate) fn col(self) -> usize { self.col }
 
     #[inline]
-    pub(crate) fn len(&self) -> usize { self.len }
+    pub(crate) fn len(self) -> usize { self.len }
 }
 
 /// This implementation serves as a safe default, with a format `{line}:{col}`.

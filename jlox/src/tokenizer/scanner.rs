@@ -3,10 +3,7 @@ use std::{
     ops::Not
 };
 
-use crate::{
-    Error, ErrorTrace, ToError,
-    tokenizer::{Location, Token, TokenType, scanner::peeker_pattern::PeekerPattern}
-};
+use crate::tokenizer::{Location, Token, TokenType, scanner::peeker_pattern::PeekerPattern};
 
 mod peeker_pattern;
 
@@ -40,7 +37,7 @@ impl Scanner<'_> {
 
     pub(crate) fn col(&self) -> usize { self.col }
 
-    pub(crate) fn advance(&mut self, buf: &mut [u8; 1]) -> Result<bool, Error> {
+    pub(crate) fn advance(&mut self, buf: &mut [u8; 1]) -> Result<bool, anyhow::Error> {
         let Self { buf: source, line, .. } = self;
 
         if let Err(err) = source.read_exact(buf) {
@@ -48,7 +45,7 @@ impl Scanner<'_> {
                 return Ok(false);
             }
 
-            return Err(IoBound { inner: err.into(), line: *line }.convert(None));
+            anyhow::bail!(IoBound { inner: err.into(), line: *line }.convert(None));
         }
 
         Ok(true)

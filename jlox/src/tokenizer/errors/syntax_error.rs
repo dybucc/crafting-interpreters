@@ -1,79 +1,52 @@
 use std::{
+    any::TypeId,
     cmp::Ordering,
     error::Error,
-    hash::{Hash, Hasher}
+    fmt::{self, Display},
+    hash::{Hash, Hasher},
+    marker::PhantomData
 };
 
-use anyhow::anyhow;
 use thiserror::Error;
 
 use crate::tokenizer::Location;
 
-#[derive(Debug, Error)]
-#[error("{span}: {src}")]
-pub(crate) struct SyntaxError {
-    pub(crate) span: Location,
-    pub(crate) src: Box<dyn Error + Send + Sync + 'static>
+const trait SyntaxErrorMarker: Display {
+    fn new() -> Self;
 }
 
-impl SyntaxError {
-    pub(crate) fn new(loc: Location, err: impl Error + Send + Sync + 'static) -> Self {
-        Self { span: loc, src: Box::new(err) as Box<dyn Error + Send + Sync + 'static> }
-    }
+#[derive(Debug, Error)]
+#[error("{span}: {}", E::new())]
+pub(crate) struct SyntaxError<E: SyntaxErrorMarker> {
+    span: Location,
+    _marker: PhantomData<E>
+}
 
-    pub(crate) fn other(loc: Location, err: impl Error + Send + Sync + 'static) -> Self {
-        Self { span: loc, src: Box::new(err) as Box<dyn Error + Send + Sync + 'static> }
-    }
+impl<E: SyntaxErrorMarker> SyntaxError<E> {
+    pub(crate) fn new(loc: Location, err: E) -> Self { Self { span: loc, _marker: PhantomData } }
 
-    pub(crate) fn hash_with_err(&self, state: &mut impl Hasher) -> anyhow::Result<()> {
-        self.span.hash(state);
-
-        ErrorKind::which(self.src).ok_or_else(|| anyhow!("PENDING")).map(|err| match err {
-            ErrorKind::MalformedNumber => todo!(),
-            ErrorKind::UnexpectedEof => todo!(),
-            ErrorKind::InvalidUtf8 => todo!(),
-            ErrorKind::Other => todo!()
-        })
-    }
-
-    pub(crate) fn same_line(&self, other: &Self) -> bool {
-        let SyntaxError { span: src, .. } = self;
-        let SyntaxError { span: other, .. } = other;
-
-        src.same_line(other)
-    }
+    pub(crate) fn same_line(&self, other: &Self) -> bool { self.span.same_line(other.span) }
 
     pub(crate) fn akin_spans(&self, other: &Self) -> bool {
-        let SyntaxError { span: src, .. } = self;
-        let SyntaxError { span: other, .. } = other;
-
-        src.same_line(other) && src.akin_col(other)
+        self.span.same_line(other.span) && self.span.akin_col(other.span)
     }
 
-    pub(crate) fn merge(&mut self, other: &Self) {
-        let SyntaxError { span: src, .. } = self;
-        let SyntaxError { span: other, .. } = other;
+    pub(crate) fn merge(&mut self, other: &Self) { self.span.merge_cols(other.span); }
+}
 
-        src.merge_cols(*other);
+impl<E: SyntaxErrorMarker + Hash> Hash for SyntaxError<E> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.span.hash(state);
+
+        E::new().hash(state)
     }
 }
 
-/// This implemenation will hash on the error span only.
-///
-/// For an implementation that hashes on both the span and the underlying error,
-/// see [`SyntaxError::hash_with_err`].
-///
-/// [`SyntaxError::hash_with_err`]: self::SyntaxError::hash_with_err
-impl Hash for SyntaxError {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.span.hash(state); }
-}
-
-impl PartialEq for SyntaxError {
-    fn eq(&self, other: &Self) -> bool {
-        matches!(
-            self.partial_cmp(other).expect("internal error did not contain syntax errors"),
-            Ordering::Equal
-        )
+impl<E1: SyntaxErrorMarker + PartialEq, E2: SyntaxErrorMarker + PartialEq>
+    PartialEq<SyntaxError<E2>> for SyntaxError<E1>
+{
+    fn eq(&self, other: &SyntaxError<E2>) -> bool {
+        self.span.eq(&other.span) && E1::new().eq(&E2::new())
     }
 }
 
@@ -85,7 +58,7 @@ impl PartialOrd for SyntaxError {
     /// Downcasting the error is left for last because it requires multiple runs
     /// of [`Error::downcast`] method on all possible syntax errors.
     ///
-    /// [`Error::downcast`]: anyhow::Error::downcast
+    /// [`Error::downcast`]: fn@anyhow::Error::downcast
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match self.span.cmp(&other.span) {
             Ordering::Equal => ErrorKind::which(self.src).and_then(|self_err| {
@@ -122,7 +95,7 @@ macro_rules! errors {
             $it,
         )+}
 
-        impl ErrorKind {
+        const impl ErrorKind {
             fn which(err: Box<dyn Error + Send + Sync + 'static>) -> Option<Self> {
                 errors! { err, $($it),+ }
             }
@@ -137,9 +110,19 @@ macro_rules! errors {
 
         $(
             #[derive(Debug, Error, Copy, Hash)]
-            #[derive_const(Clone, PartialEq, Eq, PartialOrd, Ord)]
+            #[derive_const(Clone)]
             #[error($display)]
             pub(crate) struct $it;
+
+            const impl SyntaxErrorMarker for $it {
+                fn new() -> Self { Self }
+            }
+
+            const impl<E: SyntaxErrorMarker> PartialEq<E> for $it {
+                fn eq(&self, other: &E) -> bool { TypeId::of::<Self>().eq(&TypeId::of::<E>()) }
+            }
+
+            const impl Eq for $it {}
         )+
     };
 }

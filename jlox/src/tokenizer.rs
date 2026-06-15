@@ -11,7 +11,7 @@ use std::{
 };
 
 pub(crate) use crate::tokenizer::{
-    errors::SyntaxError, lexeme::Lexeme, literal::Lit, location::Location, token_type::TokenType
+    errors::*, lexeme::Lexeme, literal::Lit, location::Location, token_type::TokenType
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

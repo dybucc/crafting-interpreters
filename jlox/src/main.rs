@@ -6,8 +6,7 @@
 use std::{
     fs,
     io::{self, BufRead, Write},
-    path::Path,
-    process::Termination
+    path::Path
 };
 
 use clap::Parser;
