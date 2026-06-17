@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    fmt::{self, Display}
+    fmt::{self, Display, Formatter}
 };
 
 #[derive(Debug, Copy, Hash)]
@@ -18,30 +18,27 @@ impl Location {
     #[inline]
     pub(crate) fn same_line(self, other: Self) -> bool { self.line == other.line }
 
-    // NOTE: if this is used outside `SyntaxError`s, consider adding a
-    // different/auxiliary routine to consider more cases of similarity between
-    // spans, beyond column comparison in the same line.
+    /// compares two locations for similarity based off of their current
+    /// positions in a line.
+    ///
+    /// this does not necessarily mean that both locations must be positioned on
+    /// the same line, but that is often the case.
     #[inline]
     pub(crate) fn akin_col(self, other: Self) -> bool {
-        // NOTE: example showcase of syntax error spans being merged. Locations are
+        // NOTE: example showcase of syntax error spans being merged. locations are
         // determined to be akin if they compare equal within one byte offset
         // difference.
         // self:  func s(s: t1, s t2:
         //                      ^^^^ expected parameter type
-        // Location { line: x, col: y, len: 5 }
+        // location { line: x, col: y, len: 4 }
         // other: func s(s: t1, s: t2:
         //                           ^ unexpected char, expected ')'
-        // Location { line: x, col: y + 1, len: 1 }
+        // location { line: x, col: y + 4, len: 1 }
         // other: func s(s: t1, s t2:
         //                      ^^^^^ expected parameter type
         //                            unexpected char, expected ')'
-        // Location { line: x, col: y, len: 6 }
-
-        if (self.col + self.len).abs_diff(other.col + other.len) <= 1 {
-            return true;
-        }
-
-        false
+        // location { line: x, col: y, len: 5 }
+        (self.col + self.len).abs_diff(other.col + other.len) <= 1
     }
 
     pub(crate) fn merge_cols(&mut self, other: Self) {
@@ -67,14 +64,10 @@ impl Location {
     pub(crate) fn len(self) -> usize { self.len }
 }
 
-/// This implementation serves as a safe default, with a format `{line}:{col}`.
+/// this implementation serves as a safe default, with a format {line}:{col}.
 ///
-/// This may be overwritten in `Display` implemenations of wrapping types
-/// through the provided accessors on the `Location` type.
+/// this may be overwritten in display implemenations of wrapping types through
+/// the provided accessors on the location type.
 impl Display for Location {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { line, col, .. } = self;
-
-        write!(f, "{line}:{col}")
-    }
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result { write!(f, "{}:{}", self.line, self.col) }
 }

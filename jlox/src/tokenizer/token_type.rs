@@ -1,4 +1,7 @@
-use std::fmt::{self, Debug, Display as StdDisplay, Formatter};
+use std::{
+    bstr::ByteStr,
+    fmt::{self, Debug, Display as StdDisplay, Formatter}
+};
 
 mod display;
 
@@ -56,7 +59,10 @@ impl TokenType {
             b"==" => TokenType::EqualEqual,
             b">=" => TokenType::GreaterEqual,
             b"<=" => TokenType::LessEqual,
-            _ => unreachable!()
+            _ => unreachable!(
+                "two-byte tokens should only be one of: `!=`, `==`, `>=`, `<=`; got {}",
+                ByteStr::new(bytes)
+            )
         }
     }
 
@@ -76,34 +82,33 @@ impl TokenType {
             b'=' => TokenType::Equal,
             b'>' => TokenType::Greater,
             b'<' => TokenType::Less,
-            _ => unreachable!()
+            _ => unreachable!(
+                "single-byte tokens should only be one of: `(`, `)`, `{{`, `}}`, `,`, `.`, `-`, \
+                 `+`, `;`, `*`, `!`, `=`, `>`, `<`; got {}",
+                ByteStr::new(&[byte])
+            )
         }
     }
 
-    /// Provided an external displayable type, this will return a display
+    /// provided an external displayable type, this will return a display
     /// adapter that will use that displayable if the token type is one of a
     /// string, an idenfitfier or a number.
     ///
-    /// Otherwise, the default [`Display`] impl for `TokenType` will be used
-    /// instead.
-    ///
-    /// [`Display`]: trait@std::fmt::Display
+    /// otherwise, the default display impl for tokentype will be used instead.
     pub(crate) fn display_with(self, token: &impl StdDisplay) -> Display<'_> {
         Display::new(self, token)
     }
 }
 
-/// Displays the token type with lossy information for richer token types.
+/// displays the token type with lossy information for richer token types.
 ///
-/// This implementation will correctly provide the same source code
+/// this implementation will correctly provide the same source code
 /// representations of each token type to all tokens but strings, identifiers,
-/// and numbers. These will use a fallback display implementation that is likely
+/// and numbers. these will use a fallback display implementation that is likely
 /// not representative of the token itself.
 ///
-/// To provide as well a type with which to format the afore mentioned token
-/// types, see the [`TokenType::display_with`] method.
-///
-/// [`TokenType::display_with`]: fn@self::TokenType::display_with
+/// to provide as well a type with which to format the afore mentioned token
+/// types, see the tokentype::display_with method.
 impl StdDisplay for TokenType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {

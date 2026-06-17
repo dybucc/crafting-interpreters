@@ -1,6 +1,6 @@
 #![feature(
     bufreader_peek, string_from_utf8_lossy_owned, derive_const, const_trait_impl, const_cmp,
-    const_default, const_clone
+    const_default, const_clone, bstr
 )]
 
 use std::{
@@ -16,10 +16,10 @@ mod runtime;
 mod support;
 mod tokenizer;
 
-use crate::{args::Args, runtime::run, tokenizer::SyntaxError};
+use self::{args::Args, runtime::run, tokenizer::SyntaxError};
 
 fn main() -> anyhow::Result<()> {
-    if let Some(file) = Args::parse().script() { run_file(file) } else { run_prompt() }
+    Args::parse().script().map_or_else(|| run_prompt(), |file| run_file(file))
 }
 
 fn run_file(file: impl AsRef<Path>) -> anyhow::Result<()> {
