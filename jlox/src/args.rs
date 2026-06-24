@@ -1,11 +1,7 @@
-use clap::Parser;
+use std::borrow::Cow;
 
-#[derive(Debug, Parser)]
-#[command(disable_version_flag = true, disable_help_subcommand = true)]
-pub(crate) struct Args {
-    script: Option<String>
-}
-
-impl Args {
-    pub(crate) fn script(&self) -> Option<&String> { self.script.as_ref() }
-}
+/// fetches the cli script.
+///
+/// the script is optional. the program will read from stdin. a script can skip
+/// that.
+pub(super) fn get_file() -> Option<Cow<'static, str>> { todo!() }
